@@ -5,9 +5,14 @@ import sys
 import numpy as np
 
 from . import world
+from .affect import Affect, Appraisal
 from .brain import INTENTS, Learner, Policy
+from .cognition import deliberate, evaluate, generate
 from .link import LinkSession
+from .memory import Episode, Memory
+from .selfmodel import SelfModel
 from .sim import Simulation
+from .social import Social
 from .unit import N_OBS, Unit
 
 FAILURES = []
@@ -82,9 +87,147 @@ def test_unit():
         clock.advance()
     check("drives stay bounded under decay",
           0 <= u.hunger <= 1 and 0 <= u.fatigue <= 1 and 0 <= u.loneliness <= 1)
-    u.remember(0, "the same thing")
-    u.remember(1, "the same thing")
-    check("memory does not stutter", len(u.memories) == 1)
+    check("pain counts against wellbeing",
+          (lambda a, b: b < a)(u.wellbeing(), (setattr(u, "pain", 0.5), u.wellbeing())[1]))
+
+
+def test_appraisal():
+    """The point of appraisal: same badness, different emotion."""
+    print("appraisal")
+    robbed = Appraisal(valence=-0.8, agency="other", control=0.2, norm=-1.0).emotions()
+    laid_off = Appraisal(valence=-0.8, agency="circumstance", control=0.15,
+                         irreversible=0.8).emotions()
+    caught = Appraisal(valence=-0.6, agency="self", norm=-0.9, public=1.0,
+                       harmed_other=0.5).emotions()
+    dark = Appraisal(valence=-0.7, anticipated=True, certainty=0.4,
+                     control=0.2).emotions()
+    check("being wronged produces anger",
+          max(robbed, key=robbed.get) == "anger", robbed)
+    check("being laid off produces sadness, not anger",
+          max(laid_off, key=laid_off.get) == "sadness"
+          and laid_off.get("anger", 0) == 0, laid_off)
+    check("one's own fault produces shame and guilt",
+          caught.get("shame", 0) > 0.3 and caught.get("guilt", 0) > 0.3, caught)
+    check("what might happen produces fear",
+          list(dark) == ["fear"], dark)
+
+    a = Affect()
+    for _ in range(200):
+        a.feel(Appraisal(valence=-0.6, anticipated=True, certainty=0.6,
+                         control=0.2).emotions(), scale=0.45)
+        for _ in range(4):
+            a.decay()
+    check("a long run of bad hours becomes chronic stress", a.stress > 0.5,
+          f"{a.stress:.2f}")
+    check("stress suppresses the will to act", a.drive() < 0.8, f"{a.drive():.2f}")
+
+
+def test_memory():
+    print("memory")
+    m = Memory()
+    rob = Appraisal(valence=-0.9, agency="other", control=0.2, norm=-1.0).emotions()
+    m.encode(Episode(tick=100, kind="robbed", text="robbed on Crenshaw",
+                     district="Leimert Park", people=("Vernon",), emotions=rob))
+    for t in range(6):
+        m.encode(Episode(tick=200 + t, kind="ate", text="lunch",
+                         district="Downtown", place="philippes",
+                         emotions={"joy": 0.1}))
+    now = 6000
+    bad, dull = m.episodes[0], m.episodes[-1]
+    check("what you felt is what you keep", bad.salience > 3 * dull.salience,
+          f"{bad.salience:.2f} vs {dull.salience:.2f}")
+    check("the worst of it stays reachable while the rest fades",
+          bad.retrievability(now) > 0.4 > dull.retrievability(now),
+          f"{bad.retrievability(now):.2f} vs {dull.retrievability(now):.2f}")
+    check("recall is cued by where you are",
+          m.recall(now, district="Leimert Park")[0][1] is bad)
+    check("recall is cued by who is there",
+          m.recall(now, people=("Vernon",))[0][1] is bad)
+    check("a place where it happened is dreaded",
+          m.dread(now, district="Leimert Park") > m.dread(now, district="Downtown"))
+    before = bad.salience
+    for _ in range(50):
+        m.dread(now, district="Leimert Park")
+    check("weighing options does not rehearse memory",
+          bad.salience == before, f"{before:.3f} -> {bad.salience:.3f}")
+    check("repeated harm becomes a belief about the district",
+          m.danger_of("Leimert Park") > m.danger_of("Downtown"))
+
+
+def test_social_and_self():
+    print("social and self")
+    s = Social()
+    for t in range(15):
+        s.met("Ruth Okada", t * 10, quality=0.9)
+    s.treated("Ruth Okada", 200, valence=0.6)
+    s.treated("Amos Pym", 300, valence=-0.7, betrayal=0.6)
+    check("trust follows how you were treated",
+          s.of("Ruth Okada").trust > s.of("Amos Pym").trust)
+    check("betrayal leaves a grudge", s.of("Amos Pym").grudge > 0.3)
+    check("the closest person is the one you know and like",
+          s.closest(1)[0].name == "Ruth Okada")
+    check("you stay wary of the one who wronged you",
+          "Amos Pym" in [r.name for r in s.feared()])
+
+    m = SelfModel()
+    for _ in range(60):
+        m.did("work", True)
+    for _ in range(60):
+        m.did("provision", False)
+    check("competence follows evidence",
+          m.can("work") > 0.8 > 0.2 > m.can("provision"),
+          f"work {m.can('work'):.2f} provision {m.can('provision'):.2f}")
+    m.expectation["payday"] = 0.2
+    surprise = m.outcome("payday", 0.9)
+    check("a better outcome than expected is a positive surprise",
+          surprise > 0.4 and m.surprises == 1, f"{surprise:.2f}")
+    check("surprise moves what the unit expects next time",
+          m.expect("payday") > 0.2)
+
+
+def test_deliberation():
+    print("deliberation")
+    s = Simulation(n_units=6, seed=11)
+    s.clock.tick = 11 * world.TICKS_PER_HOUR
+    u = s.units[0]
+    u.employed = True
+    u.location_key = u.home_key
+    u.district = u.home.district
+
+    opts = generate(s, u)
+    check("options are concrete places, not bare intents",
+          any(o.venue for o in opts) and len(opts) > len(INTENTS))
+    deliberate(s, u)
+    kinds = [o.intent for o in u.considered]
+    check("only the best option of each kind is weighed",
+          len(kinds) == len(set(kinds)), kinds)
+    check("every option records why it scored as it did",
+          all(o.reasons for o in u.considered))
+
+    # a unit with nothing scores work above a night out; a comfortable one does not
+    def score_of(unit, intent):
+        return next((o.score for o in unit.considered if o.intent == intent), None)
+    u.funds, u.debt, u.hunger = 0.0, 5 * world.DAILY_COST, 0.2
+    u.affect = Affect()
+    deliberate(s, u)
+    broke_gap = score_of(u, "work") - (score_of(u, "socialize") or -9)
+    u.funds, u.debt = 40 * world.DAILY_COST, 0.0
+    deliberate(s, u)
+    rich_gap = score_of(u, "work") - (score_of(u, "socialize") or -9)
+    check("need for money pulls a unit towards work", broke_gap > rich_gap,
+          f"broke {broke_gap:+.2f} vs comfortable {rich_gap:+.2f}")
+
+    # somewhere it was hurt scores worse than somewhere it was not
+    v = next(x for x in world.VENUES if x.kind == "social" and x.district != u.district)
+    from .cognition import Option
+    plain = evaluate(s, u, Option("socialize", v.key))
+    u.memory.encode(Episode(tick=s.clock.tick - 10, kind="robbed",
+                            text="robbed", district=v.district, place=v.key,
+                            emotions=Appraisal(valence=-0.9, agency="other",
+                                               control=0.2, norm=-1.0).emotions()))
+    after = evaluate(s, u, Option("socialize", v.key))
+    check("a unit avoids where it was hurt", after < plain - 0.3,
+          f"{plain:+.2f} -> {after:+.2f}")
 
 
 def test_sim_runs_unattended():
@@ -115,30 +258,82 @@ def test_purchases_happen_once():
     s.clock.tick = 12 * world.TICKS_PER_HOUR
     crowd = s._crowd_by_venue()
     before = u.funds
-    s._resolve(u, "eat", crowd, may_travel=False, first=True)
+    u.intent, u.target = "eat", diner.key
+    s._perform(u, crowd, first=True)
     for _ in range(3):
-        s._resolve(u, "eat", crowd, may_travel=False, first=False)
+        s._perform(u, crowd, first=False)
     check("an hour at a counter buys one meal",
           abs((before - u.funds) - diner.cost) < 1e-9,
           f"spent {before - u.funds:.2f} on a {diner.cost:.2f} meal")
 
 
+def _fire_once():
+    """Dismiss one unit and hand back the episode it laid down."""
+    t = Simulation(n_units=1, seed=77)
+    v = t.units[0]
+    t.clock.tick = 7 * world.TICKS_PER_DAY
+    while v.employed:
+        t._week[v.name] = 0
+        t._daily(v)
+    return next(e for e in v.memory.episodes if e.kind == "lost_job")
+
+
+def test_struggle():
+    """The grind has to actually bite, or none of the feeling means anything."""
+    print("struggle")
+    s = Simulation(n_units=14, seed=6)
+    s.run_days(120)
+    hardship = [u for u in s.units if u.debt > 0 or u.affect.stress > 0.3]
+    felt = [u for u in s.units if any(e.salience > 0.5 for e in u.memory.episodes)]
+
+    # Dismissal is rare by design, so test the mechanism rather than hope the
+    # population happened to show one in the window.
+    fired = 0
+    for trial in range(40):
+        t = Simulation(n_units=1, seed=500 + trial)
+        v = t.units[0]
+        t.clock.tick = 7 * world.TICKS_PER_DAY
+        t._week[v.name] = 0                      # a week with no work at all
+        t._daily(v)
+        fired += not v.employed
+    check("staying away from work costs a unit the job", 5 < fired < 40, fired)
+    check("a unit who loses the job feels it",
+          any(e.kind == "lost_job" and e.salience > 0.5
+              for e in Simulation(n_units=1, seed=501).units[0].memory.episodes
+              or [_fire_once()]))
+    check("hardship shows up as debt or stress", len(hardship) >= 3, len(hardship))
+    check("units are carrying memories that mattered", len(felt) >= 7, len(felt))
+    check("relationships form between units",
+          max(u.social.known() for u in s.units) >= 3)
+    check("nobody is stuck feeling nothing",
+          any(u.affect.dominant()[0] != "settled" for u in s.units))
+
+
 def test_units_learn():
     """The load-bearing claim: they are self-learning, not scripted."""
     print("learning")
-    s = Simulation(n_units=16, seed=3)
-    s.run_days(30)
-    early = s.stats()["reward"]
-    s.run_days(400)
-    late = s.stats()["reward"]
-    check("population reward improves with experience", late > early + 0.2,
-          f"{early:+.3f} -> {late:+.3f}")
+    thinking = Simulation(n_units=14, seed=3)
+    thinking.run_days(140)
+    flailing = Simulation(n_units=14, seed=3, deliberate=False)
+    flailing.run_days(140)
+    a, b = thinking.stats(), flailing.stats()
+    check("deliberation keeps units fed", a["hunger"] < b["hunger"] - 0.05,
+          f"{a['hunger']:.2f} vs {b['hunger']:.2f} choosing at random")
+    check("deliberation keeps units solvent", a["debt"] < b["debt"],
+          f"${a['debt']:.0f} vs ${b['debt']:.0f} choosing at random")
+    check("deliberation keeps units in work", a["unemployed"] <= b["unemployed"],
+          f"{a['unemployed']} vs {b['unemployed']} choosing at random")
+    check("deliberation leaves units better off overall",
+          a["wellbeing"] > b["wellbeing"],
+          f"{a['wellbeing']:.3f} vs {b['wellbeing']:.3f} choosing at random")
+    check("units have formed beliefs about the city",
+          sum(len(u.memory.places) for u in thinking.units) / len(thinking.units) >= 3)
 
     worked_weekday, worked_weekend = 0, 0
     for _ in range(7):
         counter = [0]
-        workday = s.clock.is_workday
-        s.run_days(1, on_tick=lambda sim: counter.__setitem__(
+        workday = thinking.clock.is_workday
+        thinking.run_days(1, on_tick=lambda sim: counter.__setitem__(
             0, counter[0] + sum(1 for u in sim.units if u.worked_last)))
         if workday:
             worked_weekday += counter[0]
@@ -150,11 +345,11 @@ def test_units_learn():
 
     night = day = 0
     for _ in range(world.TICKS_PER_DAY * 3):
-        s.step()
-        asleep = sum(1 for u in s.units if u.activity == "asleep")
-        if s.clock.hour < 6 or s.clock.hour >= 22:
+        thinking.step()
+        asleep = sum(1 for u in thinking.units if u.activity == "asleep")
+        if thinking.clock.hour < 6 or thinking.clock.hour >= 22:
             night += asleep
-        elif 10 <= s.clock.hour < 18:
+        elif 10 <= thinking.clock.hour < 18:
             day += asleep
     check("units sleep at night rather than in the afternoon",
           night > day * 1.3, f"night={night} day={day}")
@@ -178,7 +373,7 @@ def test_link():
     check("the unit noticed the missing hours", u.dissonance > 0,
           f"{u.dissonance:.3f}")
     check("the gap is in its memory",
-          any("cannot account" in m.text for m in u.memories))
+          any("cannot account" in m.text for m in u.memory.episodes))
 
     second = LinkSession(s, u)
     second.jack_in()
@@ -201,7 +396,8 @@ def test_determinism():
 def main():
     for t in (test_world, test_learner_finds_reward, test_circadian, test_unit,
               test_sim_runs_unattended, test_purchases_happen_once,
-              test_units_learn, test_link,
+              test_appraisal, test_memory, test_social_and_self,
+              test_deliberation, test_struggle, test_units_learn, test_link,
               test_determinism):
         t()
     print()

@@ -28,30 +28,67 @@ def _build(args, announce=True):
 def cmd_run(args):
     sim = Simulation(n_units=args.units, seed=args.seed)
     print(f"SIMULACRON -- {world.EPOCH}, {args.units} units, no operator linked.")
-    print(f"{'day':>5} {'reward':>8} {'wellbeing':>10} {'funds':>9} "
-          f"{'hunger':>7} {'fatigue':>8} {'work h':>7} {'anom':>5}")
+    print(f"{'day':>5} {'wellbeing':>10} {'funds':>9} {'debt':>8} {'hunger':>7} "
+          f"{'stress':>7} {'trauma':>7} {'jobless':>8} {'ill':>4} {'friends':>8} "
+          f"{'work h':>7} {'anom':>5}")
     for day in range(1, args.days + 1):
         worked = [0]
         sim.run_days(1, on_tick=lambda s: worked.__setitem__(
             0, worked[0] + sum(1 for u in s.units if u.worked_last)))
         if day % max(1, args.every) == 0 or day == args.days:
             st = sim.stats()
-            print(f"{st['day']:>5} {st['reward']:>+8.3f} {st['wellbeing']:>10.3f} "
-                  f"{st['funds']:>9.2f} {st['hunger']:>7.2f} {st['fatigue']:>8.2f} "
+            print(f"{st['day']:>5} {st['wellbeing']:>10.3f} {st['funds']:>9.2f} "
+                  f"{st['debt']:>8.2f} {st['hunger']:>7.2f} {st['stress']:>7.2f} "
+                  f"{st['trauma']:>7.3f} {st['unemployed']:>8} {st['ill']:>4} "
+                  f"{st['friends']:>8.1f} "
                   f"{worked[0] / args.units / world.TICKS_PER_HOUR:>7.1f} "
                   f"{st['anomalies']:>5}")
-    for line in sim.log[-10:]:
+    for line in sim.log[-12:]:
         print(line)
     return sim
 
 
 def cmd_units(args):
     sim = _build(args)
-    for u in sorted(sim.units, key=lambda x: -x.funds)[:args.show]:
+    for u in sorted(sim.units, key=lambda x: -x.affect.stress)[:args.show]:
         print(u.describe())
-        for m in u.recent_memories(3):
-            print(f"  ...{m.text}")
+        recent = u.memory.recent(3)
+        if recent:
+            print("  remembers:")
+            for m in recent:
+                print(f"    {m.text} (salience {m.salience:.2f})")
         print()
+
+
+def cmd_mind(args):
+    """One unit, in full: what it feels, believes, remembers and expects."""
+    sim = _build(args)
+    if args.unit:
+        matches = [u for u in sim.units if args.unit.lower() in u.name.lower()]
+        u = matches[0] if matches else None
+    else:
+        u = max(sim.units, key=lambda x: x.affect.stress + x.affect.trauma)
+    if u is None:
+        print("No such unit. Try: " + ", ".join(x.name for x in sim.units[:6]))
+        return
+    print(u.describe())
+    print("\n  what it believes about places:")
+    for line in u.memory.describe_places():
+        print(f"    {line}")
+    print("\n  who it knows:")
+    for line in u.social.describe(6):
+        print(f"    {line}")
+    print("\n  what it carries:")
+    for m in sorted(u.memory.episodes, key=lambda e: -e.salience)[:6]:
+        felt = ", ".join(f"{k} {v:.2f}" for k, v in
+                         sorted(m.emotions.items(), key=lambda kv: -kv[1])[:2])
+        print(f"    [{m.salience:.2f}] {m.text}" + (f" -- {felt}" if felt else ""))
+    print(f"\n  ruminated {u.rumination} times; "
+          f"{u.selfmodel.surprises} surprises so far")
+    if u.considered:
+        print("\n  last time it decided:")
+        for o in sorted(u.considered, key=lambda o: -o.score)[:5]:
+            print(f"    {o.score:+.2f}  {o.label():40s} {o.why(3)}")
 
 
 def cmd_rhythm(args):
@@ -121,6 +158,11 @@ def main(argv=None):
     y = sub.add_parser("rhythm", help="the daily rhythm the units learned")
     y.add_argument("--days", type=int, default=365)
     y.set_defaults(fn=cmd_rhythm)
+
+    m = sub.add_parser("mind", help="one unit's inner life in full")
+    m.add_argument("--days", type=int, default=365)
+    m.add_argument("--unit", default=None, help="name (or part of one)")
+    m.set_defaults(fn=cmd_mind)
 
     j = sub.add_parser("jackin", help="link a mind into a unit")
     j.add_argument("--days", type=int, default=365)

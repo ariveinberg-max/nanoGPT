@@ -108,8 +108,9 @@ class LinkSession:
             return f"This body does not know how to '{intent}'."
         before = (u.funds, u.hunger, u.fatigue, u.loneliness)
         crowd = self.sim._crowd_by_venue()
-        self.sim._resolve(u, intent, crowd, may_travel=True)
         u.intent = intent
+        u.target = u.location_key
+        self.sim._perform(u, crowd, first=True)
         after = (u.funds, u.hunger, u.fatigue, u.loneliness)
         if u.travelling:
             return f"You set off to {intent}. {u.travel_left} stops."
@@ -134,6 +135,20 @@ class LinkSession:
     def status(self):
         return self.unit.describe()
 
+    def inner(self):
+        """What this body is carrying around: feeling, beliefs, people."""
+        u = self.unit
+        out = [f"  feeling   {u.affect.describe()}",
+               f"  self      {u.selfmodel.narrative(u.affect)}"]
+        if u.social.people:
+            out.append("  people:")
+            out += [f"    {line}" for line in u.social.describe(4)]
+        places = u.memory.describe_places()
+        if places:
+            out.append("  places:")
+            out += [f"    {line}" for line in places[:4]]
+        return "\n".join(out)
+
 
 HELP = """\
   look                 take in where this body is
@@ -142,6 +157,7 @@ HELP = """\
   wait [hours]         let the prototype run around you
   who                  who else is in the district
   memories             what this body remembers
+  inner                what it feels, believes and thinks of people
   status               drives, funds, dissonance
   jackout              return to your own body
 """
@@ -184,6 +200,8 @@ def repl(sim, unit, stream_in=None, stream_out=print):
             stream_out(", ".join(names) if names else "Nobody in this district.")
         elif cmd == "memories":
             stream_out(session.memories())
+        elif cmd == "inner":
+            stream_out(session.inner())
         elif cmd == "status":
             stream_out(session.status())
         elif cmd in INTENTS:

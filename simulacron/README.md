@@ -18,14 +18,78 @@ Everything in that speech is a requirement. This is the build — pointed at
 | Whitney's claim | How it is implemented |
 | --- | --- |
 | doesn't need a user to function | `Simulation.step()` drives every unit; no operator is required, and the CLI's `run` never links one |
-| fully formed self-learning beings | each unit owns a policy-and-value network trained online from its own lived reward — nothing about its day is scripted |
-| they think | an observation of 26 signals in, a distribution over eight intents out, every simulated hour |
+| fully formed self-learning beings | each unit has episodic memory, appraisal-based emotion, a model of itself and a standing with everyone it has met; a learned habit layer sits underneath |
+| they think | perceive → appraise → recall → generate concrete options → evaluate → choose, every simulated hour, with the reasons kept |
 | they work / they eat | jobs at 2010 wages, meals at 2010 prices, and an economy a unit has to solve to stay fed |
-| modeled after us | five sampled traits (sociability, diligence, appetite, restlessness, thrift) and a circadian rhythm |
+| modeled after us | five sampled traits, a circadian rhythm, chronic stress, trauma that intrudes, and rent falling due whether or not there is work |
 | Los Angeles, 2010 | eight districts, 39 venues, Metro Rail where it existed that year |
 | jacked in / the body stays | `LinkSession` suspends a unit's policy and hands you its body; jacking out leaves a hole in its memory |
 
 Pure Python and numpy. No torch, no downloads, no network.
+
+## The inner life
+
+Units are not scored on a handful of drives any more. Each one carries:
+
+- **Episodic memory.** Events are encoded at a strength set by what they felt
+  like. Ordinary ones fade; the worst do not, and can surface unbidden.
+  Crucially, recall is *inside* the decision: before choosing, a unit cues its
+  memory with where it is, who is there and what it is considering.
+- **Emotion by appraisal.** Nothing sets an emotion directly. An event is
+  scored on goal congruence, certainty, agency, coping potential, norm
+  violation and irreversibility, and fear, anger, sadness, shame, guilt, joy,
+  pride, hope and relief fall out of the pattern. Being robbed and being laid
+  off are both bad; one has an agent and the other does not, so one produces
+  anger and the other sadness. A single mood scalar cannot make that
+  distinction, and the distinction is behavioural.
+- **A self-model.** Beliefs about what it is competent at, where its life is
+  going, and what it is — beliefs formed from its own history, which reality
+  can contradict. It predicts how something will go, finds out, and the gap is
+  surprise.
+- **Other units as individuals.** Familiarity, trust, affection and grudges,
+  per person, rather than a crowd count.
+- **A body that can fail it.** Illness, pain, rent, debt and dismissal.
+
+What that buys, in the sim's own words — one unit after ninety days:
+
+```
+Ruth Abernathy
+  works   the city planning department at $26.00/hr  [OUT OF WORK]
+  hunger      [##########]   fatigue [..........]
+  funds       $0.00   debt $104.27
+  feeling     sadness 0.96, fear 0.86 | stress 1.00 | trauma 0.20 | drive 0.15
+  self        Sees itself as nobody in particular. Good at work (0.90). Worn down.
+  chose       sleep at a rent-stabilized unit off Western
+              -- fear -0.86, retreat +0.80, habit +0.17
+```
+
+Nothing in the code models despair. Job loss produced sadness and fear;
+sustained negative affect became chronic stress; stress cut `drive`, which is
+the multiplier on every effortful option; and the fear term made retreating
+home score above going out. A withdrawal spiral, assembled from parts that
+each do something simpler.
+
+## Does the thinking do anything?
+
+Improvement over time is the wrong test here: rent, illness and dismissal make
+the world a grind, and against a grind holding steady is the achievement. So
+the control is the same bodies in the same city choosing **uniformly at random
+from the same options** (`Simulation(deliberate=False)`). After 140 days, 14
+units:
+
+| | deliberating | choosing at random |
+| --- | --- | --- |
+| wellbeing | 0.685 | 0.499 |
+| hunger | 0.74 | 1.00 (starving) |
+| fatigue | 0.43 | 0.95 |
+| debt | $41 | $525 |
+| savings | $591 | $0 |
+| out of work | 1 | 4 |
+| chronic stress | 0.07 | 0.93 |
+| people known | 5.0 | 11.6 |
+
+The last row is the honest one: the units who never think about anything have
+many more friends, because they are out every night. They are also destitute.
 
 ## Run it
 
@@ -33,8 +97,9 @@ Pure Python and numpy. No torch, no downloads, no network.
 python -m simulacron --units 24 run --days 500      # unattended, reports as it goes
 python -m simulacron --units 24 rhythm --days 500   # what the units actually do, by hour
 python -m simulacron --units 24 units --days 500    # who is down there
+python -m simulacron mind --days 500                # one unit's inner life in full
 python -m simulacron jackin --days 500              # walk around in 2010
-python -m simulacron.test_simulacron                # 31 checks, ~13s
+python -m simulacron.test_simulacron                # 65 checks, ~50s
 ```
 
 ## Why 2010 and not 1937
@@ -146,14 +211,44 @@ Which is, of course, how the picture starts.
 ## Layout
 
 ```
-world.py   2010 Los Angeles: districts, venues, wages, prices, transit times
-unit.py    a cyber being: drives, traits, circadian rhythm, episodic memory
-brain.py   the policy and value heads, and the actor-critic learner
-sim.py     the system; resolves intents, runs with or without an operator
-link.py    jack-in, jack-out, and the interactive 2010 shell
+world.py      2010 Los Angeles: districts, venues, wages, prices, transit
+unit.py       a cyber being: body, traits, circadian rhythm, and the systems below
+affect.py     appraisal, the emotions it yields, chronic stress and trauma
+memory.py     episodes, salience, cued recall, and beliefs about places
+selfmodel.py  competence, prospects, identity, expectation and its violation
+social.py     other units as individuals: trust, affection, grudges
+cognition.py  deliberation: options, evaluation, choice, and experiencing outcomes
+brain.py      the learned habit layer (policy and value heads, actor-critic)
+sim.py        the system; performs choices, runs the grind, with or without an operator
+link.py       jack-in, jack-out, and the interactive 2010 shell
 ```
 
 ## Design notes
+
+### Building the inner life
+
+Four bugs were worth the finding:
+
+- **Weighing options rehearsed memory.** Recall strengthens what it touches,
+  and deliberation cues memory several times an hour. Within days every
+  trivial episode had maximum salience and units had equally unforgettable
+  lunches. Only deliberate recall rehearses now.
+- **Option-count bias.** Thirteen bars against one bed meant `socialize` won
+  the softmax on sheer count: units socialised 38% of the time while starving.
+  Units now bring to mind the best option of each kind and choose among those,
+  which is both the fix and a better model of how anyone decides.
+- **Conditions were never appraised.** Hunger, debt, pain and unemployment are
+  states, not events, so nothing scored them and a unit could starve without
+  ever becoming distressed. They are appraised weakly every hour, which is what
+  turns a bad month into chronic stress rather than a run of unrelated bad
+  hours.
+- **The commute was charged to the first hour.** A shift across town scored
+  exactly zero (`travel -0.98, money +0.98`) and units with a long ride stopped
+  going to work. The fare is now paid against the whole visit — and jobs are
+  sited near homes, because drawing them at random handed people a daily round
+  trip across the county.
+
+### Getting the habit layer to learn at all
 
 Six things had to be got right before units learned anything at all. Most of
 them were found by measuring a population that had stopped improving and
