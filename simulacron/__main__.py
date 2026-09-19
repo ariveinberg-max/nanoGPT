@@ -3,7 +3,7 @@
     python -m simulacron run      --days 365      # let it run; nobody is watching
     python -m simulacron units    --days 365      # who is down there
     python -m simulacron rhythm   --days 365      # the day they taught themselves
-    python -m simulacron jackin   --days 365      # walk around in 1937
+    python -m simulacron jackin   --days 365      # walk around in 2010
 """
 
 import argparse
@@ -55,7 +55,12 @@ def cmd_units(args):
 
 
 def cmd_rhythm(args):
-    """Sample the population's chosen intent hour by hour over a working week."""
+    """What the population actually does, hour by hour, over a working week.
+
+    Deliberately reports activity rather than intent: a unit that sets out for
+    a shut workplace wanted to work but spent the hour idle, and only the
+    second of those is a fact about the day it has learned.
+    """
     sim = _build(args)
     table = {h: {} for h in range(24)}
     days = 0
@@ -67,17 +72,17 @@ def cmd_rhythm(args):
             sim.step()
             h = sim.clock.hour
             for u in sim.units:
-                table[h][u.intent] = table[h].get(u.intent, 0) + 1
+                table[h][u.activity] = table[h].get(u.activity, 0) + 1
         days += 1
     print(f"The weekday {args.units} units taught themselves over {args.days} days")
-    print(f"{'hour':>5}  {'dominant':<11} {'share':>6}  profile")
+    print(f"{'hour':>5}  {'mostly':<11} {'share':>6}  profile")
     for h in range(24):
         row = table[h]
         if not row:
             continue
         total = sum(row.values())
         top, n = max(row.items(), key=lambda kv: kv[1])
-        bars = " ".join(f"{k[:4]}{'#' * max(1, round(9 * v / total))}"
+        bars = " ".join(f"{k.split()[-1][:5]}{'#' * max(1, round(9 * v / total))}"
                         for k, v in sorted(row.items(), key=lambda kv: -kv[1])[:3])
         print(f"{h:>5}  {top:<11} {n / total:>5.0%}  {bars}")
 
@@ -100,7 +105,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="simulacron", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--units", type=int, default=16, help="how many cyber beings")
-    p.add_argument("--seed", type=int, default=1937)
+    p.add_argument("--seed", type=int, default=2010)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="run the prototype unattended and report")

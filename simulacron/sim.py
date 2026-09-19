@@ -1,7 +1,7 @@
 """The system itself.
 
 It does not need a user to interact with it to function. Start it and it runs:
-units wake, ride the Red Cars, work, eat, drink, and quietly get better at
+units wake, ride the Metro, work, eat, drink, and quietly get better at
 being themselves. An operator may link in, but the simulation does not notice
 the difference except where a linked unit leaves a hole in its own memory.
 """
@@ -9,8 +9,8 @@ the difference except where a linked unit leaves a hole in its own memory.
 import numpy as np
 
 from . import world
-from .brain import INTENTS
-from .unit import Unit
+from .brain import INTENTS, Learner, Policy
+from .unit import N_OBS, Unit, circadian
 
 # A unit commits to an intent for an hour at a time. Deciding afresh every
 # quarter hour produced twitching sleepwalkers who spent all day on the Red
@@ -19,10 +19,24 @@ DECISION_TICKS = world.TICKS_PER_HOUR
 
 
 class Simulation:
-    def __init__(self, n_units=24, seed=1937, log=None):
+    def __init__(self, n_units=24, seed=2010, log=None, shared_mind=False):
+        """`shared_mind` puts every unit on one set of policy weights.
+
+        Off by default, and kept only because it is the obvious thing to reach
+        for and worth being able to reproduce: units differ in where they
+        live, where they work and what they want, and one set of weights
+        serving all of them collapsed onto a single intent for every hour of
+        the day. Fully formed beings turn out to need their own minds.
+        """
         self.rng = np.random.default_rng(seed)
         self.clock = world.Clock()
+        self.shared_mind = shared_mind
         self.units = [Unit.spawn(self.rng) for _ in range(n_units)]
+        if shared_mind:
+            substrate = Policy(N_OBS, rng=self.rng)
+            for u in self.units:
+                u.policy = substrate
+                u.learner = Learner(substrate, share=n_units)
         self.by_name = {u.name: u for u in self.units}
         self.log = log if log is not None else []
         self.anomalies = []
@@ -34,19 +48,20 @@ class Simulation:
         crowd = self._crowd_by_venue()
         for u in self.units:
             if u.travelling:
+                u.activity = "in transit"
                 self._continue_trip(u, crowd)
                 continue
 
             if u.linked:
                 # the operator is driving; the unit's own policy is suspended
-                u.decay()
+                u.decay(clock)
                 continue
 
             if u.hold_left <= 0:
                 self._decide(u, crowd)
             else:
-                self._resolve(u, u.intent, crowd, may_travel=False)
-            u.decay()
+                self._resolve(u, u.intent, crowd, may_travel=False, first=False)
+            u.decay(clock)
             self._settle(u)
 
         self._check_anomalies()
@@ -76,7 +91,7 @@ class Simulation:
             u.pending_reward = 0.0
 
     def _continue_trip(self, u, crowd):
-        """A unit on a Red Car stays committed to the errand it boarded for."""
+        """A unit in transit stays committed to the errand it set out on."""
         u.travel_left -= 1
         arrived = u.travel_left == 0
         if arrived:
@@ -84,8 +99,8 @@ class Simulation:
             u.district = world.VENUES_BY_KEY[u.travel_to].district
             u.travel_to = ""
             if not u.linked:
-                self._resolve(u, u.intent, crowd, may_travel=False)
-        u.decay()
+                self._resolve(u, u.intent, crowd, may_travel=False, first=True)
+        u.decay(self.clock)
         if not u.linked:
             self._settle(u)
 
@@ -106,12 +121,20 @@ class Simulation:
                 crowd.setdefault(u.location_key, []).append(u)
         return crowd
 
-    def _resolve(self, u, intent, crowd, may_travel=True):
-        """Carry out an intent here, or set off for somewhere it is possible."""
+    def _resolve(self, u, intent, crowd, may_travel=True, first=True):
+        """Carry out an intent here, or set off for somewhere it is possible.
+
+        `first` marks the tick a decision lands on -- the moment the unit
+        arrives, or the moment it chooses to stay put. Purchases happen then
+        and only then. Without that gate an hour of "eat" bought four meals
+        and an hour of "errand" spent twenty-four dollars, which made spending
+        money look like the most productive thing a unit could do with a day.
+        """
         clock = self.clock
         here = u.location
         u.worked_last = False
         u.earned = 0.0
+        u.activity = "idle"
 
         def go(key):
             if may_travel:
@@ -119,20 +142,26 @@ class Simulation:
 
         if intent == "sleep":
             if u.location_key == u.home_key:
-                u.fatigue = max(0.0, u.fatigue - 0.034)
+                # sleep taken at night is worth more than an afternoon nap
+                u.fatigue = max(0.0, u.fatigue - 0.034 * circadian(clock))
                 u.loneliness = min(1.0, u.loneliness + 0.002)
+                u.activity = "asleep"
             else:
                 go(u.home_key)
 
         elif intent == "eat":
             if here and here.kind == "food" and here.open_at(clock.hour) and u.funds >= here.cost:
-                u.funds -= here.cost
-                u.hunger = max(0.0, u.hunger - 0.55)
-                u.mood = min(1.0, u.mood + 0.04)
-                self._note(u, f"ate at {here.name}")
-            elif u.location_key == u.home_key and u.funds >= 0.08:
-                u.funds -= 0.08
-                u.hunger = max(0.0, u.hunger - 0.30)
+                u.activity = "eating"
+                if first:
+                    u.funds -= here.cost
+                    u.hunger = max(0.0, u.hunger - 0.85)
+                    u.mood = min(1.0, u.mood + 0.04)
+                    self._note(u, f"ate at {here.name}")
+            elif u.location_key == u.home_key and u.funds >= world.HOME_MEAL_COST:
+                u.activity = "eating"
+                if first:
+                    u.funds -= world.HOME_MEAL_COST
+                    u.hunger = max(0.0, u.hunger - 0.55)
             else:
                 go(self._nearest(u, "food", affordable=True) or u.home_key)
 
@@ -145,6 +174,7 @@ class Simulation:
                 u.fatigue = min(1.0, u.fatigue + 0.010)
                 u.loneliness = max(0.0, u.loneliness - 0.008)
                 u.worked_last = True
+                u.activity = "working"
             elif clock.is_workday and w.open_at(clock.hour):
                 go(u.work_key)
             else:
@@ -155,11 +185,14 @@ class Simulation:
         elif intent == "socialize":
             if (here and here.kind in ("social", "civic")
                     and here.open_at(clock.hour) and u.funds >= here.cost):
-                u.funds -= here.cost
                 company = max(0, len(crowd.get(u.location_key, [])) - 1)
-                u.loneliness = max(0.0, u.loneliness - (0.25 + 0.10 * min(company, 4)))
-                u.mood = min(1.0, u.mood + 0.05)
-                if company:
+                u.activity = "out"
+                # the door is paid once; the company accrues while you stay
+                if first:
+                    u.funds -= here.cost
+                u.loneliness = max(0.0, u.loneliness - (0.09 + 0.03 * min(company, 4)))
+                u.mood = min(1.0, u.mood + 0.02)
+                if first and company:
                     other = next(o for o in crowd[u.location_key] if o is not u)
                     self._note(u, f"ran into {other.name} at {here.name}")
                     self._note(other, f"ran into {u.name} at {here.name}")
@@ -170,6 +203,7 @@ class Simulation:
         elif intent == "wander":
             u.fatigue = min(1.0, u.fatigue + 0.004)
             u.mood = min(1.0, u.mood + 0.01 * u.traits["restlessness"])
+            u.activity = "out"
             if may_travel and u.rng.random() < 0.25:
                 d = str(u.rng.choice(world.DISTRICTS))
                 targets = world.venues_in(d, "civic") or world.venues_in(d, "social")
@@ -178,12 +212,15 @@ class Simulation:
 
         elif intent == "rest":
             u.fatigue = max(0.0, u.fatigue - 0.016)
+            u.activity = "resting"
 
         elif intent == "errand":
-            if u.funds >= 0.15:
-                u.funds -= 0.15
-                u.hunger = max(0.0, u.hunger - 0.08)
-                u.mood = min(1.0, u.mood + 0.01)
+            if u.funds >= world.ERRAND_COST:
+                u.activity = "errands"
+                if first:
+                    u.funds -= world.ERRAND_COST
+                    u.hunger = max(0.0, u.hunger - 0.08)
+                    u.mood = min(1.0, u.mood + 0.01)
             else:
                 u.mood = max(0.0, u.mood - 0.02)
 
@@ -194,9 +231,9 @@ class Simulation:
                 far = max(world.DISTRICTS,
                           key=lambda d: world.travel_ticks(u.district, d))
                 go(world.venues_in(far)[0].key)
-            if u.district == "Venice" and u.rng.random() < 0.06:
+            if u.district == world.EDGE_DISTRICT and u.rng.random() < 0.06:
                 u.dissonance = min(2.0, u.dissonance + 0.04)
-                self._note(u, "stood at the edge of town and could not say what lay past it")
+                self._note(u, world.EDGE_NOTE)
 
     # ------------------------------------------------------------- utilities
     def _send(self, u, key):

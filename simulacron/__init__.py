@@ -5,9 +5,11 @@
      Its units are fully formed self-learning cyber beings."
                                    -- The Thirteenth Floor (1999)
 
-Los Angeles, circa 1937, populated by units that think, work, eat, and learn
-their own daily rhythm from experience. Start it and it runs without you. Jack
-in and you walk around inside it while your body stays in the lab.
+Fuller's first prototype recreated the era of his youth. This build is pointed
+at Los Angeles in 2010 instead -- same system, later signage -- populated by
+units that think, work, eat, and learn their own daily rhythm from experience.
+Start it and it runs without you. Jack in and you walk around inside it while
+your body stays in the lab.
 """
 
 from .brain import INTENTS, Learner, Policy

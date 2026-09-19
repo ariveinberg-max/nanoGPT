@@ -1,4 +1,4 @@
-"""The link: an operator's mind, downstairs, walking around 1937.
+"""The link: an operator's mind, downstairs, walking around 2010.
 
 While you are jacked in, your body stays in the lab and the unit you occupy
 holds your consciousness. Its own policy is suspended -- it is not asleep, it
@@ -57,19 +57,19 @@ class LinkSession:
         u = self.unit
         clock = self.sim.clock
         if u.travelling:
-            return (f"{clock.stamp()} -- a Red Car, somewhere between districts. "
-                    f"{u.travel_left} stops to "
+            return (f"{clock.stamp()} -- the {world.TRANSIT_NOUN}, somewhere between "
+                    f"districts. {u.travel_left} stops to "
                     f"{world.VENUES_BY_KEY[u.travel_to].name}.")
         here = u.location
         others = [o for o in self.sim.units
                   if o is not u and o.location_key == u.location_key]
         lines = [f"{clock.stamp()}, {world.EPOCH} -- {here.name}, {u.district}."]
         if here.kind == "food":
-            lines.append(f"A meal runs {here.cost:.2f}. You have ${u.funds:.2f}.")
+            lines.append(f"A meal runs ${here.cost:.2f}. You have ${u.funds:.2f}.")
         elif here.kind == "social":
-            lines.append(f"The door is {here.cost:.2f}. You have ${u.funds:.2f}.")
+            lines.append(f"The door is ${here.cost:.2f}. You have ${u.funds:.2f}.")
         elif here.kind == "work":
-            lines.append(f"Your shift pays {here.wage:.2f} an hour.")
+            lines.append(f"Your shift pays ${here.wage:.2f} an hour.")
         if not here.open_at(clock.hour):
             lines.append("It is shut.")
         if others:
@@ -97,12 +97,12 @@ class LinkSession:
                 if vs:
                     self.sim._send(u, vs[0].key)
                     return f"Boarding for {d}. {u.travel_left} stops."
-        return f"No line runs to '{target}'."
+        return f"Nothing called '{target}' that you can get to."
 
     def do(self, intent):
         u = self.unit
         if u.travelling:
-            return (f"You are on a Red Car, {u.travel_left} stops from "
+            return (f"You are in transit, {u.travel_left} stops from "
                     f"{world.VENUES_BY_KEY[u.travel_to].name}. Try 'wait'.")
         if intent not in INTENTS:
             return f"This body does not know how to '{intent}'."
@@ -137,7 +137,7 @@ class LinkSession:
 
 HELP = """\
   look                 take in where this body is
-  go <place|district>  board a Red Car
+  go <place|district>  board the Metro, or get in the car
   eat / work / sleep / socialize / rest / wander / errand / seek
   wait [hours]         let the prototype run around you
   who                  who else is in the district
@@ -157,7 +157,7 @@ def repl(sim, unit, stream_in=None, stream_out=print):
         if stream_in is not None:
             return next(stream_in, "jackout")
         try:
-            return input("\n1937> ").strip()
+            return input(f"\n{world.EPOCH.split()[-1]}> ").strip()
         except (EOFError, KeyboardInterrupt):
             return "jackout"
 

@@ -31,6 +31,17 @@ OBS_FIELDS = (
 N_OBS = len(OBS_FIELDS)
 
 
+def circadian(clock):
+    """Sleep pressure over the day: highest around 3am, lowest mid-afternoon.
+
+    Without this a unit slept as happily at two in the afternoon as at two in
+    the morning, and the population never settled into nights. It is the
+    plainest fact about being modeled after us.
+    """
+    hour = clock.hour + clock.minute / 60.0
+    return 1.0 + 0.55 * np.cos(2 * np.pi * (hour - 3.0) / 24.0)
+
+
 @dataclass
 class Memory:
     tick: int
@@ -50,7 +61,7 @@ class Unit:
     hunger: float = 0.25
     fatigue: float = 0.25
     loneliness: float = 0.25
-    funds: float = 12.0
+    funds: float = world.STARTING_FUNDS
     mood: float = 0.5
     dissonance: float = 0.0          # accumulated evidence the world is wrong
 
@@ -58,6 +69,7 @@ class Unit:
     travel_left: int = 0
     travel_to: str = ""
     intent: str = "rest"
+    activity: str = "idle"     # what actually happened, not what was wanted
     linked: bool = False             # an operator is riding this body
     alive_ticks: int = 0
     pending_record: object = None
@@ -123,7 +135,7 @@ class Unit:
             self.hunger,
             self.fatigue,
             self.loneliness,
-            min(self.funds / 20.0, 1.5),
+            min(self.funds / (15 * world.DAILY_COST), 1.5),
             self.mood,
             np.sin(2 * np.pi * hour_frac),
             np.cos(2 * np.pi * hour_frac),
@@ -143,9 +155,9 @@ class Unit:
         return np.array(obs, dtype=float)
 
     # -- drives -------------------------------------------------------------
-    def decay(self):
+    def decay(self, clock):
         self.hunger = min(1.0, self.hunger + 0.011 * self.traits["appetite"])
-        self.fatigue = min(1.0, self.fatigue + 0.011)
+        self.fatigue = min(1.0, self.fatigue + 0.011 * circadian(clock))
         self.loneliness = min(1.0, self.loneliness + 0.006 * self.traits["sociability"])
         self.mood += 0.02 * (self.wellbeing() - self.mood)
         self.alive_ticks += 1
@@ -159,12 +171,19 @@ class Unit:
         that did nothing all day but manage their own fatigue.
         """
         r = self.wellbeing()
-        r += 0.60 * min(self.funds / 3.0, 1.0)      # security, smoothly felt
-        r += 2.5 * self.earned                      # the wage itself
+        # Money is felt relative to what a day costs in this era, so the same
+        # learner works whether a meal is 35 cents or seven dollars.
+        r += 0.60 * min(self.funds / (2.5 * world.DAILY_COST), 1.0)
+        r += 3.0 * self.earned / world.DAILY_COST   # the wage itself
         if self.worked_last:
             r += 0.12 * self.traits["diligence"]    # some of them like the work
         r -= 1.0 * max(0.0, self.hunger - 0.50)
+        # Being tired is a nuisance; being wrecked is not. The steep second
+        # term is what finally sent the population home at night -- with a
+        # single linear slope they parked at four fifths exhausted and idled
+        # through the small hours rather than going to bed.
         r -= 0.8 * max(0.0, self.fatigue - 0.50)
+        r -= 3.0 * max(0.0, self.fatigue - 0.75)
         r -= 0.5 * max(0.0, self.loneliness - 0.60)
         return r
 

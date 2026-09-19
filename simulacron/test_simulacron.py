@@ -36,9 +36,14 @@ def test_world():
     c = world.Clock(tick=world.TICKS_PER_DAY * 5)
     check("weekends land on days 5 and 6", not c.is_workday and c.weekday == "Saturday",
           c.weekday)
-    night = world.VENUES_BY_KEY["club_alabam"]
-    check("venues open across midnight", night.open_at(23) and night.open_at(1)
-          and not night.open_at(12))
+    night = next(v for v in world.VENUES if v.opens > v.closes)
+    check("venues open across midnight",
+          night.open_at(23) and night.open_at(night.closes - 1)
+          and not night.open_at(night.opens - 1), night.name)
+    check("a day's costs are set for the era", world.DAILY_COST > 0)
+    check("nobody works below the 2010 California minimum",
+          all(v.wage >= 8.00 for v in world.venues_of("work")),
+          min(v.wage for v in world.venues_of("work")))
 
 
 def test_learner_finds_reward():
@@ -56,14 +61,25 @@ def test_learner_finds_reward():
           f"p={prob:.3f}")
 
 
+def test_circadian():
+    print("circadian")
+    from .unit import circadian
+    night = circadian(world.Clock(tick=3 * world.TICKS_PER_HOUR))
+    noon = circadian(world.Clock(tick=15 * world.TICKS_PER_HOUR))
+    check("sleep pressure peaks in the small hours", night > 1.4 > 0.7 > noon,
+          f"3am={night:.2f} 3pm={noon:.2f}")
+
+
 def test_unit():
     print("unit")
     u = Unit.spawn(np.random.default_rng(7))
     obs = u.observe(world.Clock())
     check("observation width matches the declared layout", len(obs) == N_OBS)
     check("observations are finite", np.all(np.isfinite(obs)))
+    clock = world.Clock()
     for _ in range(500):
-        u.decay()
+        u.decay(clock)
+        clock.advance()
     check("drives stay bounded under decay",
           0 <= u.hunger <= 1 and 0 <= u.fatigue <= 1 and 0 <= u.loneliness <= 1)
     u.remember(0, "the same thing")
@@ -84,6 +100,27 @@ def test_sim_runs_unattended():
           min(u.funds for u in s.units))
     check("every unit accumulated experience",
           all(u.learner.reward_history for u in s.units))
+
+
+def test_purchases_happen_once():
+    """An hour of 'eat' is one meal, not one per tick."""
+    print("commitments")
+    s = Simulation(n_units=1, seed=4)
+    u = s.units[0]
+    diner = next(v for v in world.VENUES if v.kind == "food" and v.open_at(12))
+    u.location_key = diner.key
+    u.district = diner.district
+    u.funds = 500.0
+    u.hunger = 1.0
+    s.clock.tick = 12 * world.TICKS_PER_HOUR
+    crowd = s._crowd_by_venue()
+    before = u.funds
+    s._resolve(u, "eat", crowd, may_travel=False, first=True)
+    for _ in range(3):
+        s._resolve(u, "eat", crowd, may_travel=False, first=False)
+    check("an hour at a counter buys one meal",
+          abs((before - u.funds) - diner.cost) < 1e-9,
+          f"spent {before - u.funds:.2f} on a {diner.cost:.2f} meal")
 
 
 def test_units_learn():
@@ -111,6 +148,17 @@ def test_units_learn():
           worked_weekday > 0 and worked_weekend == 0,
           f"weekday={worked_weekday} weekend={worked_weekend}")
 
+    night = day = 0
+    for _ in range(world.TICKS_PER_DAY * 3):
+        s.step()
+        asleep = sum(1 for u in s.units if u.activity == "asleep")
+        if s.clock.hour < 6 or s.clock.hour >= 22:
+            night += asleep
+        elif 10 <= s.clock.hour < 18:
+            day += asleep
+    check("units sleep at night rather than in the afternoon",
+          night > day * 1.3, f"night={night} day={day}")
+
 
 def test_link():
     print("link")
@@ -124,7 +172,7 @@ def test_link():
     s.run_days(1)
     check("a linked unit stops learning on its own",
           len(u.learner.reward_history) == before)
-    check("look() describes somewhere", "1937" in link.look())
+    check("look() describes somewhere and when", world.EPOCH in link.look())
     msg = link.jack_out()
     check("link releases the body", not u.linked and "SEVERED" in msg)
     check("the unit noticed the missing hours", u.dissonance > 0,
@@ -151,8 +199,9 @@ def test_determinism():
 
 
 def main():
-    for t in (test_world, test_learner_finds_reward, test_unit,
-              test_sim_runs_unattended, test_units_learn, test_link,
+    for t in (test_world, test_learner_finds_reward, test_circadian, test_unit,
+              test_sim_runs_unattended, test_purchases_happen_once,
+              test_units_learn, test_link,
               test_determinism):
         t()
     print()
