@@ -27,6 +27,109 @@ Everything in that speech is a requirement. This is the build — pointed at
 
 Pure Python and numpy. No torch, no downloads, no network.
 
+## What a unit is called, and what world it lives in
+
+**Units** is the lab's word — the film's own ("its units are fully formed
+self-learning cyber beings"). It is clinical and external, and no unit would
+ever use it about itself. So there are two registers: the API, `mind`, `units`
+and `city` speak the lab's language; the jack-in shell and anything a unit says
+about itself speak from inside, where they are people with names.
+
+The world is eight districts and nothing else. There is no California around
+it, no ocean floor, no moon at two hundred and forty thousand miles. But a
+person is mostly made of things they have never checked — you believe in
+Lisbon — so every unit carries **received knowledge of an Earth that was never
+built**: New York, the war, the tide, the stars. None of it is reachable and
+none of it can be verified.
+
+The value is the seam. A unit that walks to the water's edge, looks down the
+coast, stands at Griffith Observatory after dark, or asks someone what lies
+past the county line is querying that account against a prototype that does not
+extend that far, and gets back something that will not resolve. That is what
+`dissonance` measures now. Worrying at one seam habituates — forty trips to the
+water leaves a unit at 0.63 confidence — but finding a *second, independent*
+one is what actually erodes: four different seams, once each, takes it to 0.50.
+
+It turns the scope limit into the mechanism rather than an apology for it. I
+cannot simulate Earth. I can simulate people who believe in one they cannot
+reach, and who can find the edge of it.
+
+## Mortality
+
+Nothing in the simulation meant anything until `_reap` existed. Units die of
+starvation, illness and age; `peril()` estimates how close the end is and feeds
+deliberation directly, so fear of dying is a reason to eat and to go to work.
+Death removes a unit and the people who knew it grieve — bereavement appraises
+as sadness at maximum salience, the most memorable thing in a survivor's life.
+
+It is also the sharpest validation the architecture has. Over 120 days the
+population that deliberates buries nobody. The same bodies choosing at random
+starve to death.
+
+Surviving a bad stretch is evidence a unit can cope, which finally gives the
+`coping` belief something to move on. It had been frozen at exactly 0.5 for
+every unit in every run — and it is the courage term dividing fear, so every
+unit was identically brave, permanently.
+
+## A life, rather than a loop
+
+Units used to spring into existence as interchangeable thirty-year-olds. Now
+capacity rises through childhood, holds, and falls after sixty-five; frailty
+raises illness risk and slows mending; work has an age floor and ceiling.
+Mortality is Gompertz — doubling roughly every eight years — giving life
+expectancy 71 at birth and 80 at 65.
+
+A child's world is small and grows: at two it can eat, rest and sleep, and
+nothing else; at ten it has its own district; at twenty-five it has the city.
+Left with the adult option set a one-year-old rode across the county alone and
+stood at the edge of town questioning the nature of reality, which is a
+memorable image and completely wrong.
+
+## Family, and belief that outlives the believer
+
+Everything a unit knew used to die with it, so the population never accumulated
+anything and nobody had ever been told something. Children are not spawned now;
+they are born to particular people, and they begin with **their parents'
+account of the world** rather than a blank one — which streets are dangerous,
+who can be trusted, what a person is for, and how much of it to doubt. None of
+it is learned, because a child has lived no days. It is inherited, and it is
+wrong in the specific ways its parents were wrong.
+
+That is the only mechanism here that produces something nobody wrote.
+
+## Crime, policing, and how fear gets around
+
+Robbery is not a mode a unit enters. It is an option on the same list as going
+to bed, scored by the same machinery, and it mostly loses. The same unit, the
+same victim:
+
+```
+comfortable, in work   peril 0.00  ->  rob scores -3.00
+broke but well         peril 0.00  ->  rob scores -3.00
+starving               peril 0.62  ->  rob scores -1.39
+```
+
+Desperation is what brings it into range. Being known to the victim pushes it
+back out.
+
+Policing is deliberately crude and deliberately reflexive: **patrol follows
+reported crime, and nothing else.** That one line produces the loop everyone
+already knows about — more patrol means more arrests means more recorded crime
+means more patrol — and the drift is towards where offences are *seen* rather
+than where they happen. Whether a crime is reported at all depends on the
+victim, not the crime.
+
+Fear travels much further than crime does. After 300 days with 20 units:
+
+```
+Koreatown      feared by 12/24  mean danger 0.25  (9 of them on hearsay)
+Boyle Heights  feared by 12/24  mean danger 0.25  (5 of them on hearsay)
+Hollywood      feared by  0/24  mean danger 0.07  (0 of them on hearsay)
+```
+
+Nine of the twelve units afraid of Koreatown have never been there. They were
+told, by someone they trust, and they stay away.
+
 ## The inner life
 
 Units are not scored on a handful of drives any more. Each one carries:
@@ -98,8 +201,9 @@ python -m simulacron --units 24 run --days 500      # unattended, reports as it 
 python -m simulacron --units 24 rhythm --days 500   # what the units actually do, by hour
 python -m simulacron --units 24 units --days 500    # who is down there
 python -m simulacron mind --days 500                # one unit's inner life in full
+python -m simulacron city --days 500                # crime, policing, and what the city believes
 python -m simulacron jackin --days 500              # walk around in 2010
-python -m simulacron.test_simulacron                # 65 checks, ~50s
+python -m simulacron.test_simulacron                # 114 checks
 ```
 
 ## Why 2010 and not 1937
@@ -212,6 +316,10 @@ Which is, of course, how the picture starts.
 
 ```
 world.py      2010 Los Angeles: districts, venues, wages, prices, transit
+worldview.py  received knowledge of an Earth that was never built, and its seams
+lifecourse.py age: capacity, frailty, and a Gompertz mortality curve
+family.py     pairing, birth, kinship, and belief inherited rather than learned
+crime.py      robbery as an option, reflexive policing, and rumour
 unit.py       a cyber being: body, traits, circadian rhythm, and the systems below
 affect.py     appraisal, the emotions it yields, chronic stress and trauma
 memory.py     episodes, salience, cued recall, and beliefs about places

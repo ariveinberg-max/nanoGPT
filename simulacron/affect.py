@@ -77,7 +77,7 @@ class Appraisal:
                 # my control changes is whether the anger has anywhere to go,
                 # and how much of the event lands as fear instead.
                 blame = 0.4 + 0.6 * max(0.0, -self.norm)
-                out["anger"] = bad * c * blame * (0.35 + 0.65 * self.control)
+                out["anger"] = bad * c * blame * (0.55 + 0.45 * self.control)
                 out["fear"] = bad * c * helpless * 0.5
                 out["sadness"] = bad * c * helpless * (0.3 + 0.7 * self.irreversible)
                 out["joy"] = good * c * 0.6

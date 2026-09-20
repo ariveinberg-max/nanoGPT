@@ -107,13 +107,16 @@ class Worldview:
             f"; probed {probed}" if probed else "")
 
 
-def inherit(parent):
+def inherit(parent, confidence=None):
     """A child takes its account of the world from whoever raised it.
 
     Including, and this is the point, the erosion. A unit raised by someone who
-    had stopped believing the account does not start from certainty.
+    had stopped believing the account does not start from certainty. Where
+    there are two of them a child absorbs both, so one steady parent does not
+    simply overwrite what the other one has stopped believing.
     """
     w = Worldview(places=parent.places, history=parent.history,
                   cosmology=parent.cosmology)
-    w.confidence = min(1.0, 0.55 + 0.45 * parent.confidence)
+    base = parent.confidence if confidence is None else confidence
+    w.confidence = min(0.99, 0.55 + 0.44 * base)
     return w

@@ -124,6 +124,36 @@ def cmd_rhythm(args):
         print(f"{h:>5}  {top:<11} {n / total:>5.0%}  {bars}")
 
 
+def cmd_city(args):
+    """The city as the lab sees it: offences, attention, and belief."""
+    sim = _build(args)
+    st = sim.stats()
+    print(f"{world.EPOCH} + {st['day']} days")
+    print(f"  {st['alive']} alive ({st['children']} children), {st['born']} born, "
+          f"{st['dead']} dead, {st['jailed']} inside")
+    print(f"  {st['robberies']} robberies, {st['unemployed']} out of work, "
+          f"{st['anomalies']} asking questions about the shape of the world")
+    print("\n  policing -- patrol follows reported crime, and nothing else:")
+    for line in sim.police.describe():
+        print(f"    {line}")
+    print("\n  what the city believes about its own districts:")
+    for d in world.DISTRICTS:
+        held = [u.memory.places[d].danger for u in sim.units if d in u.memory.places]
+        been = [u.memory.places[d].visits for u in sim.units if d in u.memory.places]
+        if not held:
+            continue
+        secondhand = sum(1 for u in sim.units
+                         if d in u.memory.places and u.memory.places[d].visits <= 3
+                         and u.memory.places[d].danger > 0.2)
+        print(f"    {d:14s} feared by {sum(1 for x in held if x > 0.2):2d}/"
+              f"{len(sim.units):2d}  mean danger {sum(held)/len(held):.2f}"
+              f"  ({secondhand} of them on hearsay)")
+    if sim.dead:
+        print("\n  the dead:")
+        for tick, u, cause in sim.dead[-5:]:
+            print(f"    {u.name}, {u.age:.0f}, of {cause}")
+
+
 def cmd_jackin(args):
     sim = _build(args)
     if args.unit:
@@ -163,6 +193,10 @@ def main(argv=None):
     m.add_argument("--days", type=int, default=365)
     m.add_argument("--unit", default=None, help="name (or part of one)")
     m.set_defaults(fn=cmd_mind)
+
+    c = sub.add_parser("city", help="crime, policing and what people believe")
+    c.add_argument("--days", type=int, default=365)
+    c.set_defaults(fn=cmd_city)
 
     j = sub.add_parser("jackin", help="link a mind into a unit")
     j.add_argument("--days", type=int, default=365)

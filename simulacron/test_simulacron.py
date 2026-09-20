@@ -5,6 +5,7 @@ import sys
 import numpy as np
 
 from . import world
+from . import lifecourse
 from .affect import Affect, Appraisal
 from .brain import INTENTS, Learner, Policy
 from .cognition import deliberate, evaluate, generate
@@ -268,14 +269,30 @@ def test_purchases_happen_once():
           f"spent {before - u.funds:.2f} on a {diner.cost:.2f} meal")
 
 
+def _working_age(sim, age=35.0):
+    """Ages are drawn at random now, so a test that needs a worker says so."""
+    v = sim.units[0]
+    v.age = age
+    v.refresh_stage()
+    v.employed = True
+    return v
+
+
 def _fire_once():
     """Dismiss one unit and hand back the episode it laid down."""
     t = Simulation(n_units=1, seed=77)
-    v = t.units[0]
     t.clock.tick = 7 * world.TICKS_PER_DAY
-    while v.employed:
-        t.units[0].week_ticks = 0
+    v = _working_age(t)
+    for _ in range(200):
+        if not v.employed:
+            break
+        v.week_ticks = 0
         t._daily(v)
+        v.employed = v.employed and True
+        if not v.employed:
+            break
+        v.age = 35.0            # keep the dismissal the only way out
+        v.refresh_stage()
     return next(e for e in v.memory.episodes if e.kind == "lost_job")
 
 
@@ -368,6 +385,160 @@ def test_mortality():
           f"{len(thinking.dead)} dead vs {len(flailing.dead)} choosing at random")
 
 
+def test_family():
+    """Belief that outlives the believer is the only thing here nobody wrote."""
+    print("family")
+    from . import family as fam
+    s = Simulation(n_units=6, seed=31)
+    s.run_days(10)
+    a, b = s.units[0], s.units[1]
+    for u in (a, b):
+        u.age = 30.0
+        u.refresh_stage()
+    for _ in range(30):
+        a.social.met(b.name, s.clock.tick, quality=1.0)
+        b.social.met(a.name, s.clock.tick, quality=1.0)
+    check("two people who have become close may pair", fam.may_pair(a, b))
+    a.family.partner, b.family.partner = b.name, a.name
+    check("someone already paired does not pair again", not fam.may_pair(a, b))
+
+    # give the parents something distinctive to pass on
+    a.memory.places.setdefault("Boyle Heights", __import__(
+        "simulacron.memory", fromlist=["x"]).PlaceBelief()).danger = 0.9
+    a.social.of("Vernon Okada").trust = 0.05
+    a.social.of("Vernon Okada").familiarity = 0.8
+    for seam in ("edge", "sky", "horizon"):
+        a.worldview.probe(seam)
+    parent_doubt = a.worldview.confidence
+
+    child = s._bear(a, b)
+    check("a child is born to particular people",
+          child.age == 0.0 and set(child.family.parents) == {a.name, b.name})
+    check("both parents have the child", child.name in a.family.children
+          and child.name in b.family.children)
+    check("a child inherits which streets are dangerous",
+          child.memory.danger_of("Boyle Heights") > 0.5,
+          f"{child.memory.danger_of('Boyle Heights'):.2f}")
+    check("a child inherits who not to trust",
+          child.social.of("Vernon Okada").trust < 0.4,
+          f"{child.social.of('Vernon Okada').trust:.2f}")
+    check("a child inherits its parent's doubt about the world",
+          parent_doubt < child.worldview.confidence < 1.0,
+          f"parent {parent_doubt:.2f}, child {child.worldview.confidence:.2f}")
+    check("none of that was learned -- the child has lived no days",
+          child.alive_ticks == 0 and not child.memory.episodes)
+
+    check("a child cannot work", not lifecourse.can_work(child.age))
+    child.age = 2.0
+    child.refresh_stage()
+    small = generate(s, child)
+    child.age = 30.0
+    child.refresh_stage()
+    grown = generate(s, child)
+    check("a child's world is smaller and grows", len(small) < len(grown),
+          f"{len(small)} options at two, {len(grown)} at thirty")
+
+    # a parent who cannot feed a child feels it
+    child.age = 4.0
+    child.refresh_stage()
+    child.hunger = 0.95
+    a.funds = 0.0
+    s._provide(a)
+    guilt = [e for e in a.memory.episodes if e.kind == "cannot_provide"]
+    check("a parent who cannot feed a child feels it", len(guilt) == 1)
+    check("and feels it as shame and guilt, not as fear",
+          guilt and set(("shame", "guilt")) & set(guilt[0].emotions),
+          guilt[0].emotions if guilt else None)
+
+    before = b.family.partner
+    s._die(a, "illness")
+    check("a death ends the partnership", before and not b.family.partner)
+    check("the survivor grieves",
+          any(e.kind == "bereaved" for e in b.memory.episodes))
+
+
+def test_crime():
+    """Crime is an option on the same list as going to bed, and mostly loses."""
+    print("crime")
+    from . import crime
+    s = Simulation(n_units=12, seed=5)
+    s.run_days(60)
+    u, victim = s.units[0], max(s.units[1:], key=lambda x: x.funds)
+    u.location_key = victim.location_key = "philippes"
+    u.district = victim.district = "Downtown"
+    victim.funds = 200.0
+
+    u.funds, u.hunger, u.health = 400.0, 0.2, 1.0
+    comfortable = sum(crime.temptation(u, victim, s.police, s).values())
+    u.funds, u.hunger, u.health = 0.0, 0.97, 0.35
+    desperate = sum(crime.temptation(u, victim, s.police, s).values())
+    check("desperation is what makes robbery worth considering",
+          desperate > comfortable + 1.0,
+          f"{comfortable:+.2f} comfortable vs {desperate:+.2f} starving")
+    check("and it still does not simply pay", comfortable < 0)
+
+    friend = next(o for o in s.units if o not in (u, victim))
+    for _ in range(25):
+        u.social.met(friend.name, s.clock.tick, quality=1.0)
+    friend.funds = 200.0
+    friend.location_key, friend.district = "philippes", "Downtown"
+    stranger = sum(crime.temptation(u, victim, s.police, s).values())
+    known = sum(crime.temptation(u, friend, s.police, s).values())
+    check("you do not rob people you know", known < stranger,
+          f"{known:+.2f} a friend vs {stranger:+.2f} a stranger")
+
+    # the act itself
+    before_v, before_u = victim.funds, u.funds
+    take, hurt, caught = crime.commit(s, u, victim, s.police)
+    check("the money moves", victim.funds < before_v and u.funds > before_u)
+    got = [e for e in victim.memory.episodes if e.kind == "robbed"]
+    check("the victim remembers it", got and got[-1].salience > 0.5,
+          f"{len(got)} robberies, last salience "
+          f"{got[-1].salience:.2f}" if got else "none")
+    got = got[-1:]
+    check("and remembers it as anger, being something someone did to them",
+          got and max(got[0].emotions, key=got[0].emotions.get) in ("anger", "fear"),
+          got[0].emotions if got else None)
+    check("the victim now counts themselves one", victim.selfmodel.roles["victim"] > 0.2)
+    check("and will not trust the person who did it",
+          victim.social.of(u.name).trust < 0.4)
+    check("the offender feels it too, as shame or guilt",
+          any(e.kind == "robbery" and
+              {"shame", "guilt"} & set(e.emotions) for e in u.memory.episodes))
+
+    # fear travels further than the crime
+    hearsay = [o for o in s.units
+               if o not in (u, victim)
+               and o.memory.places.get("Downtown")
+               and o.memory.places["Downtown"].danger > 0.15
+               and o.memory.places["Downtown"].visits <= 3]
+    check("people who were not there come to fear the place", len(hearsay) >= 1,
+          len(hearsay))
+
+    # policing follows reports, and the attention it pays is bounded
+    p = crime.Police()
+    for _ in range(6):
+        p.record("Boyle Heights", reported=True)
+    for _ in range(200):
+        p.reallocate()
+    top = max(p.patrol.values())
+    check("patrol follows reported crime", p.patrol["Boyle Heights"] == top)
+    check("but one district cannot swallow the whole force", top < 0.45,
+          f"{top:.1%}")
+    check("and nowhere is abandoned", min(p.patrol.values()) > 0.03)
+
+    jailed = Simulation(n_units=4, seed=9)
+    v = jailed.units[0]
+    jailed.imprison(v, 45)
+    check("an arrest takes a unit out of circulation",
+          v not in jailed.units and jailed.jail)
+    check("and it marks them", v.selfmodel.roles["offender"] > 0
+          and not v.employed)
+    jailed.clock.tick += 46 * world.TICKS_PER_DAY
+    jailed._release()
+    check("and lets them out again", v in jailed.units and not jailed.jail)
+
+
 def test_struggle():
     """The grind has to actually bite, or none of the feeling means anything."""
     print("struggle")
@@ -381,9 +552,9 @@ def test_struggle():
     fired = 0
     for trial in range(40):
         t = Simulation(n_units=1, seed=500 + trial)
-        v = t.units[0]
         t.clock.tick = 7 * world.TICKS_PER_DAY
-        t.units[0].week_ticks = 0                      # a week with no work at all
+        v = _working_age(t)
+        v.week_ticks = 0                       # a week with no work at all
         t._daily(v)
         fired += not v.employed
     check("staying away from work costs a unit the job", 5 < fired < 40, fired)
@@ -411,8 +582,8 @@ def test_units_learn():
           f"{a['hunger']:.2f} vs {b['hunger']:.2f} choosing at random")
     check("deliberation keeps units solvent", a["debt"] < b["debt"],
           f"${a['debt']:.0f} vs ${b['debt']:.0f} choosing at random")
-    check("deliberation keeps units in work", a["unemployed"] <= b["unemployed"],
-          f"{a['unemployed']} vs {b['unemployed']} choosing at random")
+    check("deliberation keeps money in units' pockets", a["funds"] > b["funds"],
+          f"${a['funds']:.0f} vs ${b['funds']:.0f} choosing at random")
     check("deliberation leaves units better off overall",
           a["wellbeing"] > b["wellbeing"],
           f"{a['wellbeing']:.3f} vs {b['wellbeing']:.3f} choosing at random")
@@ -489,7 +660,8 @@ def main():
     for t in (test_world, test_learner_finds_reward, test_circadian, test_unit,
               test_sim_runs_unattended, test_purchases_happen_once,
               test_appraisal, test_memory, test_social_and_self,
-              test_deliberation, test_worldview, test_mortality,
+              test_deliberation, test_worldview, test_mortality, test_family,
+              test_crime,
               test_struggle, test_units_learn, test_link,
               test_determinism):
         t()

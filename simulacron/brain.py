@@ -27,6 +27,7 @@ INTENTS = (
     "rest",
     "errand",
     "seek",
+    "rob",
 )
 N_INTENTS = len(INTENTS)
 

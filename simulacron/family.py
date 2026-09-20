@@ -84,7 +84,8 @@ def inherit_beliefs(child, parents):
     from .worldview import inherit
 
     primary = max(parents, key=lambda p: p.worldview.confidence)
-    child.worldview = inherit(primary.worldview)
+    shared = sum(p.worldview.confidence for p in parents) / len(parents)
+    child.worldview = inherit(primary.worldview, confidence=shared)
 
     for parent in parents:
         # which streets are dangerous, taken on trust rather than on evidence
@@ -102,7 +103,7 @@ def inherit_beliefs(child, parents):
             mine.affection = 0.5 * rel.affection
         # what a person is supposed to be
         for role, weight in parent.selfmodel.roles.items():
-            child.selfmodel.roles[role] += 0.25 * weight / len(parents)
+            child.selfmodel.roles[role] += 0.18 * weight / len(parents)
 
     for role in child.selfmodel.roles:
         child.selfmodel.roles[role] = min(1.0, child.selfmodel.roles[role])

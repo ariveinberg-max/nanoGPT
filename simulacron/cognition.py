@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from . import lifecourse, world
+from . import crime, lifecourse, world
 from .affect import NEGATIVE, Appraisal
 from .brain import INTENTS
 from .memory import Episode
@@ -57,15 +57,28 @@ class Option:
 
 # ---------------------------------------------------------------- generation
 def generate(sim, u):
-    """The options this unit can actually see from where it stands."""
+    """The options this unit can actually see from where it stands.
+
+    A child's world is small, and gets bigger. Left with the adult option set
+    a one-year-old was riding across the county on its own and standing at the
+    edge of town questioning the nature of reality, which is a memorable image
+    and completely wrong.
+    """
     clock = sim.clock
+    child = u.age < lifecourse.ADULT
+    near = u.home.district
     opts = [Option("rest"), Option("sleep", u.home_key)]
+    if child and u.age < 6.0:
+        # too small to go anywhere or do anything about it
+        return opts + [Option("eat", u.home_key)]
 
     if (u.workplace.open_at(clock.hour) and clock.is_workday and u.employed
             and lifecourse.can_work(u.age)):
         opts.append(Option("work", u.work_key))
 
     for v in world.venues_of("food"):
+        if child and v.district != near:
+            continue
         if v.open_at(clock.hour) and v.cost <= u.funds:
             opts.append(Option("eat", v.key))
     if u.funds >= world.HOME_MEAL_COST:
@@ -73,18 +86,42 @@ def generate(sim, u):
 
     crowd = sim.district_population()
     for v in world.venues_of("social"):
+        if child and v.district != near:
+            continue
         if v.open_at(clock.hour) and v.cost <= u.funds:
             hoped = _who_might_be_there(u, crowd.get(v.district, ()))
             opts.append(Option("socialize", v.key, hoped))
     for v in world.venues_of("civic"):
+        if child and v.district != near:
+            continue
         if v.open_at(clock.hour):
             opts.append(Option("socialize", v.key))
 
-    if u.funds >= world.ERRAND_COST:
+    # Robbery is on the same list as everything else, and is scored by the
+    # same machinery. A unit does not enter a criminal mode; it weighs this
+    # against going to bed, and mostly goes to bed.
+    if not child and u.age < 65:
+        mark = _worth_robbing(sim, u)
+        if mark is not None:
+            opts.append(Option("rob", person=mark.name))
+
+    if u.funds >= world.ERRAND_COST and not child:
         opts.append(Option("errand"))
     opts.append(Option("wander"))
-    opts.append(Option("seek"))
+    if not child:
+        opts.append(Option("seek"))
     return opts
+
+
+def _worth_robbing(sim, u):
+    """Somebody here with something on them, if anyone."""
+    best, most = None, 0.0
+    for other in sim._crowd_by_venue().get(u.location_key, ()):
+        if other is u or other.age < lifecourse.ADULT:
+            continue
+        if other.funds > most:
+            best, most = other, other.funds
+    return best if most > 0.5 * world.DAILY_COST else None
 
 
 def _who_might_be_there(u, present):
@@ -128,10 +165,15 @@ def evaluate(sim, u, opt):
         r["duty"] = 0.4 * u.selfmodel.roles["worker"]
         if peril > 0.1 and u.funds < 2 * world.HOME_MEAL_COST:
             r["survival"] = 3.0 * peril      # no money and no time left to lose
+        need = u.dependents_need(sim.by_name)
+        if need > 0.05:
+            r["dependents"] = 3.2 * need     # somebody at home is going hungry
         if u.debt > 0:
             r["debt"] = 0.6 * min(1.0, u.debt / (5 * world.DAILY_COST))
     elif opt.intent == "socialize":
         r["loneliness"] = 1.5 * u.loneliness
+        if u.dependents_need(sim.by_name) > 0.35:
+            r["dependents"] = -1.6 * u.dependents_need(sim.by_name)
         if opt.person:
             rel = u.social.of(opt.person)
             r["company"] = 1.2 * rel.closeness()
@@ -140,6 +182,12 @@ def evaluate(sim, u, opt):
         r["errand"] = 0.25 * u.hunger
     elif opt.intent == "seek":
         r["restlessness"] = 0.4 * u.traits["restlessness"]
+    elif opt.intent == "rob":
+        victim = sim.by_name.get(opt.person)
+        if victim is None:
+            r["gone"] = -99.0
+        else:
+            r.update(crime.temptation(u, victim, sim.police, sim))
 
     # --- what it would cost me --------------------------------------------
     if v is not None:
@@ -246,6 +294,14 @@ def deliberate(sim, u):
         if o.intent not in best or o.score > best[o.intent].score:
             best[o.intent] = o
     opts = list(best.values())
+
+    # Satisficing: an option far behind the best one is not weighed at all.
+    # Without this the softmax leaked a few percent onto every option every
+    # hour, which is harmless for whether to rest or wander and absurd for
+    # robbery -- units committed 339 of them in two months while solvent,
+    # not because it scored well but because nothing scores zero.
+    top = max(o.score for o in opts)
+    opts = [o for o in opts if o.score >= top - 2.5]
 
     scores = np.array([o.score for o in opts])
     # Stress narrows the field. Under load a unit stops weighing and reaches

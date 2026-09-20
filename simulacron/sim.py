@@ -13,7 +13,7 @@ events for the unit to appraise, feel and remember.
 
 import numpy as np
 
-from . import cognition, lifecourse, world
+from . import cognition, crime, family, lifecourse, world
 from .affect import Appraisal
 from .brain import INTENTS, Learner, Policy
 from .unit import N_OBS, Unit, circadian, pick_job
@@ -56,6 +56,9 @@ class Simulation:
         self.log = log if log is not None else []
         self.anomalies = []
         self.dead = []              # (tick, unit, cause), kept for the record
+        self.police = crime.Police()
+        self.jail = []              # (release_tick, unit)
+        self.robberies = 0
         self.born = 0
         self._target = n_units
         for u in self.units:
@@ -84,6 +87,10 @@ class Simulation:
         if clock.tick % world.TICKS_PER_DAY == 0 and clock.tick:
             for u in list(self.units):
                 self._daily(u)
+            self.police.reallocate()
+            self._release()
+            self._pairings()
+            self._births()
             self._reap()
             self._arrivals()
         self._check_anomalies()
@@ -108,6 +115,7 @@ class Simulation:
             option = cognition.flail(self, u)
         u.intent = option.intent
         u.target = option.venue
+        u.target_person = option.person
         u.pending_record = record
         u.pending_reward = 0.0
         u.hold_left = DECISION_TICKS
@@ -234,6 +242,19 @@ class Simulation:
                                       control=0.4, irreversible=0.2),
                             place=here.key)
 
+        elif intent == "rob":
+            victim = self.by_name.get(u.target_person)
+            if (first and victim is not None and not victim.travelling
+                    and victim.location_key == u.location_key):
+                u.activity = "robbing"
+                take, hurt, caught = crime.commit(self, u, victim, self.police)
+                self.robberies += 1
+                self.log.append(
+                    f"[{self.clock.stamp()}] {u.name} robbed {victim.name} of "
+                    f"${take:.0f} in {u.district}"
+                    + (" and hurt them" if hurt else "")
+                    + (" -- arrested" if caught else "") + ".")
+
         elif intent == "rest":
             u.activity = "resting"
             u.fatigue = max(0.0, u.fatigue - 0.016)
@@ -264,6 +285,8 @@ class Simulation:
         keeps walking west keeps finding the same one, and repetition is what
         erodes the account rather than any single shock.
         """
+        if u.age < 12.0:
+            return              # you have to have been told the account first
         r = u.rng.random()
         if u.district == world.EDGE_DISTRICT and r < 0.10:
             cognition.probe_world(self, u, "edge")
@@ -279,6 +302,7 @@ class Simulation:
     # ------------------------------------------------------------- the grind
     def _daily(self, u):
         """Rent, illness, and whether there is still a job to go to."""
+        was = u.peril()
         u.age += 1.0 / lifecourse.DAYS_PER_YEAR
         u.refresh_stage()
         if u.rng.random() < lifecourse.natural_risk(u.age):
@@ -289,6 +313,12 @@ class Simulation:
             cognition.experience(
                 self, u, "retired", "too old for the work now",
                 Appraisal(valence=-0.35, control=0.2, irreversible=0.8))
+
+        if u.age < lifecourse.ADULT:
+            # children are somebody else's problem, which is the point of them
+            self._provide(u)
+            u.selfmodel.survived(was, u.peril())
+            return
 
         rent = RENT_PER_DAY * world.DAILY_COST
         if u.funds >= rent:
@@ -316,7 +346,6 @@ class Simulation:
         else:
             u.selfmodel.endorse("provider", 0.004)
 
-        was = u.peril()
         if u.hunger > 0.88:
             u.health = max(0.0, u.health - 0.055)
             if u.health < 0.5:
@@ -336,12 +365,16 @@ class Simulation:
                 self, u, "ill", "woke up ill",
                 Appraisal(valence=-0.55, control=0.15, irreversible=0.2))
 
+        self._provide(u)
         u.selfmodel.survived(was, u.peril())
+        u.selfmodel.endorse("offender", -0.004)   # it fades if you stop
         if u.social.people and max(
                 (r.closeness() for r in u.social.people.values()), default=0) > 0.45:
             u.selfmodel.endorse("friend", 0.01)
 
-        if u.employed:
+        if not lifecourse.can_work(u.age):
+            pass
+        elif u.employed:
             worked = u.week_ticks
             if self.clock.day % 7 == 0:
                 # The threshold sat right at what units actually work, so
@@ -401,6 +434,13 @@ class Simulation:
         if u.linked:
             self.log.append(f"[{self.clock.stamp()}] LINK LOST -- the operator's "
                             f"body was riding {u.name}.")
+        partner = self.by_name.get(u.family.partner)
+        if partner is not None:
+            partner.family.partner = ""
+        for name in u.family.children + list(u.family.parents):
+            kin = self.by_name.get(name)
+            if kin is not None:
+                kin.social.of(u.name).familiarity = 1.0   # you do not forget them
         for other in self.units:
             rel = other.social.people.get(u.name)
             if rel is None or rel.familiarity < 0.12:
@@ -411,6 +451,118 @@ class Simulation:
                 Appraisal(valence=-0.45 - 0.55 * closeness, control=0.0,
                           irreversible=1.0), people=(u.name,))
             rel.grudge = 0.0
+
+    def _pairings(self):
+        """Two people who have become close enough to throw their lot in."""
+        for u in self.units:
+            if u.family.partner or u.age < lifecourse.ADULT:
+                continue
+            close = u.social.closest(3)
+            for rel in close:
+                other = self.by_name.get(rel.name)
+                if other is None or not family.may_pair(u, other):
+                    continue
+                if u.rng.random() > 0.02:
+                    continue
+                u.family.partner = other.name
+                other.family.partner = u.name
+                for a, b in ((u, other), (other, u)):
+                    a.selfmodel.endorse("friend", 0.2)
+                    cognition.experience(
+                        self, a, "paired", f"threw in with {b.name}",
+                        Appraisal(valence=0.75, agency="self", norm=0.5),
+                        people=(b.name,))
+                self.log.append(f"[{self.clock.stamp()}] {u.name} and "
+                                f"{other.name} are together.")
+                break
+
+    def _births(self):
+        for u in list(self.units):
+            partner = self.by_name.get(u.family.partner)
+            if partner is None or not family.may_bear(u, partner):
+                continue
+            if u.name > partner.name:        # let one of the pair carry it
+                continue
+            if u.rng.random() > 0.0035:
+                continue
+            self._bear(u, partner)
+
+    def _bear(self, a, b):
+        child = Unit.spawn(self.rng, age=0.0,
+                           home=world.VENUES_BY_KEY[a.home_key])
+        child.traits = family.blend_traits(a, b, self.rng)
+        child.refresh_stage()
+        child.employed = False
+        child.funds = 0.0
+        family.inherit_beliefs(child, [a, b])
+        child.family.parents = (a.name, b.name)
+        self.units.append(child)
+        self._name_uniquely(child)
+        self.born += 1
+        for parent in (a, b):
+            parent.family.children.append(child.name)
+            parent.selfmodel.endorse("provider", 0.25)
+            parent.social.met(child.name, self.clock.tick, quality=1.0)
+            parent.social.of(child.name).familiarity = 1.0
+            child.social.of(parent.name).familiarity = 1.0
+            child.social.of(parent.name).trust = 0.95
+            cognition.experience(
+                self, parent, "birth", f"{child.name} was born",
+                Appraisal(valence=0.9, agency="self", norm=0.8),
+                people=(child.name,))
+        self.log.append(f"[{self.clock.stamp()}] {child.name} was born to "
+                        f"{a.name} and {b.name}.")
+        return child
+
+    def _provide(self, u):
+        """A parent feeding the people who cannot feed themselves."""
+        kids = u.family.dependents(self.by_name)
+        for child in kids:
+            if child.hunger < 0.45 or u.funds < world.HOME_MEAL_COST:
+                continue
+            u.funds -= world.HOME_MEAL_COST
+            child.hunger = max(0.0, child.hunger - 0.75)
+            child.social.met(u.name, self.clock.tick, quality=0.6)
+        # and the part that is not about calories
+        for child in kids:
+            if child.hunger > 0.75:
+                cognition.experience(
+                    self, u, "cannot_provide",
+                    f"could not feed {child.name}",
+                    Appraisal(valence=-0.85, agency="self", control=0.3,
+                              norm=-0.7, harmed_other=0.6, irreversible=0.2),
+                    people=(child.name,))
+                u.selfmodel.endorse("provider", -0.03)
+                u.selfmodel.did("provision", False)
+            elif child.hunger < 0.4:
+                u.selfmodel.did("provision", True)
+
+    def imprison(self, u, days):
+        """Removed from circulation, and from everything that was holding on."""
+        if u in self.units:
+            self.units.remove(u)
+        self.jail.append((self.clock.tick + days * world.TICKS_PER_DAY, u))
+        u.employed = False
+        u.selfmodel.endorse("offender", 0.2)
+        u.selfmodel.endorse("outsider", 0.25)
+        cognition.experience(
+            self, u, "arrested", "taken in and put away",
+            Appraisal(valence=-0.8, agency="self", norm=-0.9, public=1.0,
+                      control=0.05, irreversible=0.5))
+
+    def _release(self):
+        for release_at, u in list(self.jail):
+            if self.clock.tick < release_at:
+                continue
+            self.jail.remove((release_at, u))
+            u.location_key = u.home_key
+            u.district = u.home.district
+            u.travel_left = 0
+            self.units.append(u)
+            cognition.experience(
+                self, u, "released", "let out, with the record following",
+                Appraisal(valence=0.2, agency="circumstance", control=0.3))
+            self.log.append(f"[{self.clock.stamp()}] {u.name} was released.")
 
     def _arrivals(self):
         """People keep coming to this city. Until there are births, this is why
@@ -473,9 +625,13 @@ class Simulation:
             "trauma": float(np.mean([u.affect.trauma for u in us])),
             "peril": float(np.mean([u.peril() for u in us])) if us else 0.0,
             "alive": len(us),
+            "born": self.born,
+            "children": sum(1 for u in us if u.age < lifecourse.ADULT),
             "dead": len(self.dead),
             "unemployed": sum(1 for u in us if not u.employed),
             "ill": sum(1 for u in us if u.health < 0.9),
             "friends": float(np.mean([u.social.known() for u in us])),
+            "robberies": self.robberies,
+            "jailed": len(self.jail),
             "anomalies": len(self.anomalies),
         }

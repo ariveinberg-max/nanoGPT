@@ -43,9 +43,11 @@ class SelfModel:
         if role in self.roles:
             self.roles[role] = max(0.0, min(1.0, self.roles[role] + amount))
 
-    def identity(self):
+    def identity(self, age=None):
+        if age is not None and age < 18.0:
+            return "somebody's child"
         role, weight = max(self.roles.items(), key=lambda kv: kv[1])
-        return role if weight > 0.25 else "nobody in particular"
+        return role if weight > 0.30 else "nobody in particular"
 
     # -- expectation and its violation --------------------------------------
     def expect(self, key, default=0.0):
@@ -83,7 +85,7 @@ class SelfModel:
                 - 0.3 * self.roles["victim"] - 0.2 * self.roles["outsider"])
 
     # -- readout ------------------------------------------------------------
-    def narrative(self, affect=None):
+    def narrative(self, affect=None, age=None):
         """How this unit would say its life is going, if anyone asked."""
         best = max(self.efficacy.items(), key=lambda kv: kv[1])
         worst = min(self.efficacy.items(), key=lambda kv: kv[1])
@@ -93,7 +95,7 @@ class SelfModel:
             arc = "thinks it is going badly"
         else:
             arc = "expects more of the same"
-        line = (f"Sees itself as {self.identity()}; {arc}. "
+        line = (f"Sees itself as {self.identity(age)}; {arc}. "
                 f"Good at {best[0]} ({best[1]:.2f}), "
                 f"no good at {worst[0]} ({worst[1]:.2f}).")
         if affect is not None:

@@ -69,7 +69,12 @@ class Social:
         """Someone did something to this unit. This is where trust moves."""
         r = self.of(name)
         r.last_seen = tick
-        r.trust = max(0.0, min(1.0, r.trust + 0.12 * valence - 0.35 * betrayal))
+        # Betrayal is multiplicative, not a deduction. Subtracting a fixed
+        # amount meant that someone you had trusted for months could mug you
+        # and still come out better trusted than a stranger.
+        r.trust = max(0.0, min(1.0, r.trust + 0.12 * valence))
+        if betrayal:
+            r.trust *= max(0.0, 1.0 - 0.85 * betrayal)
         r.affection = max(-1.0, min(1.0, r.affection + 0.10 * valence))
         if valence < 0 or betrayal:
             r.grudge = min(1.0, r.grudge + 0.30 * (betrayal + max(0.0, -valence)))

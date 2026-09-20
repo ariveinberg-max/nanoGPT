@@ -17,6 +17,7 @@ from .memory import Memory
 from .selfmodel import SelfModel
 from .social import Social
 from . import lifecourse
+from .family import Family
 from .worldview import Worldview
 
 FIRST_NAMES = ("Ada", "Vernon", "Ruth", "Cleo", "Hollis", "Marguerite", "Sol",
@@ -94,6 +95,7 @@ class Unit:
     memory: Memory = field(default_factory=Memory)
     social: Social = field(default_factory=Social)
     selfmodel: SelfModel = field(default_factory=SelfModel)
+    family: Family = field(default_factory=Family)
     rumination: int = 0
     week_ticks: int = 0          # ticks worked this week
     job_search: float = 0.0      # effort put into looking
@@ -106,6 +108,7 @@ class Unit:
     intent: str = "rest"
     activity: str = "idle"
     target: str = ""
+    target_person: str = ""
     linked: bool = False
     alive_ticks: int = 0
 
@@ -169,6 +172,15 @@ class Unit:
     @property
     def travelling(self):
         return self.travel_left > 0
+
+    def dependents_need(self, by_name):
+        """The worst state anyone who relies on this unit is currently in."""
+        worst = 0.0
+        for name in self.family.children:
+            child = by_name.get(name)
+            if child is not None and child.age < 14.0:
+                worst = max(worst, 0.7 * child.hunger + 0.6 * child.peril())
+        return min(1.0, worst)
 
     def peril(self):
         """How close this unit is to not being one. 0 safe .. 1 dying.
@@ -287,8 +299,9 @@ class Unit:
         lines = [
             f"{self.name} -- {lifecourse.describe(self.age)}",
             f"  lives   {self.home.name} ({self.home.district})",
-            f"  works   {self.workplace.name} at ${self.workplace.wage:.2f}/hr"
-            + ("" if self.employed else "  [OUT OF WORK]"),
+            (f"  works   {self.workplace.name} at ${self.workplace.wage:.2f}/hr"
+             + ("" if self.employed else "  [OUT OF WORK]"))
+            if self.age >= lifecourse.ADULT else "  works   not yet",
             f"  now at  {where} in {self.district}",
             f"  hunger      [{bar(self.hunger)}]   fatigue [{bar(self.fatigue)}]",
             f"  loneliness  [{bar(self.loneliness)}]   pain    [{bar(self.pain)}]",
@@ -296,9 +309,10 @@ class Unit:
             f"  funds       ${self.funds:,.2f}"
             + (f"   debt ${self.debt:,.2f}" if self.debt > 0.01 else ""),
             f"  feeling     {self.affect.describe()}",
-            f"  self        {self.selfmodel.narrative(self.affect)}",
+            f"  self        {self.selfmodel.narrative(self.affect, self.age)}",
             f"  world       {self.worldview.describe()}",
         ]
+        lines.append(f"  family      {self.family.describe()}")
         if self.social.people:
             lines.append("  knows       " + "; ".join(self.social.describe(2)))
         beliefs = self.memory.describe_places()
