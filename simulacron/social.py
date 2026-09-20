@@ -15,6 +15,46 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class Mind:
+    """What one unit believes is going on inside another.
+
+    Built from what it has seen them do, not read off them. It can be wrong,
+    it can be out of date, and two units can hold incompatible models of the
+    same third person -- which is most of what social life is.
+    """
+
+    doing_badly: float = 0.3        # believed hardship
+    dangerous: float = 0.0          # believed willingness to harm
+    reliable: float = 0.5           # believed willingness to help
+    warm_to_me: float = 0.5         # believed regard for the observer
+    observations: int = 0
+
+    def saw(self, hardship=None, harm=None, help=None, warmth=None):
+        rate = 1.0 / min(max(self.observations, 1), 8)
+        self.observations += 1
+        if hardship is not None:
+            self.doing_badly += rate * (hardship - self.doing_badly)
+        if harm is not None:
+            self.dangerous += max(0.0, harm - self.dangerous) * 0.6 \
+                if harm > self.dangerous else rate * (harm - self.dangerous)
+        if help is not None:
+            self.reliable += rate * (help - self.reliable)
+        if warmth is not None:
+            self.warm_to_me += rate * (warmth - self.warm_to_me)
+
+    def expects_help(self):
+        return self.reliable * self.warm_to_me
+
+    def expects_harm(self):
+        return self.dangerous * (1.0 - 0.5 * self.warm_to_me)
+
+    def describe(self):
+        return (f"thinks they are {'struggling' if self.doing_badly > 0.55 else 'alright'}"
+                f", {'dangerous' if self.dangerous > 0.4 else 'harmless'}"
+                f", {'reliable' if self.reliable > 0.6 else 'not to be counted on'}")
+
+
+@dataclass
 class Relationship:
     name: str
     familiarity: float = 0.0        # 0 a stranger .. 1 knows them well
@@ -23,6 +63,7 @@ class Relationship:
     grudge: float = 0.0             # what is still owed, and forgiven slowly
     encounters: int = 0
     last_seen: int = -10 ** 9
+    mind: Mind = field(default_factory=Mind)
 
     def closeness(self):
         return max(0.0, self.familiarity * (0.4 + 0.6 * (self.affection + 1) / 2)
@@ -43,7 +84,8 @@ class Relationship:
         else:
             tone = "barely knows them"
         return (f"{self.name}: {tone} (familiarity {self.familiarity:.2f}, "
-                f"trust {self.trust:.2f}, grudge {self.grudge:.2f})")
+                f"trust {self.trust:.2f}, grudge {self.grudge:.2f}); "
+                f"{self.mind.describe()}")
 
 
 class Social:

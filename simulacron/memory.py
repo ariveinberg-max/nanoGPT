@@ -35,6 +35,8 @@ class Episode:
     emotions: dict = field(default_factory=dict)
     salience: float = 0.1           # encoding strength
     recalls: int = 0
+    because: str = ""               # what this happened on the back of
+    drift: float = 0.0              # how far it has moved from what happened
 
     def intensity(self):
         return sum(self.emotions.values())
@@ -45,6 +47,28 @@ class Episode:
         recency = 0.5 ** (age / HALF_LIFE)
         floor = self.salience ** 2
         return self.salience * max(recency, floor)
+
+
+def _reconstruct(ep, mood, stress):
+    """Rebuild the memory instead of replaying it.
+
+    A recalled episode is assembled from fragments, and what fills the gaps is
+    how the unit feels now. So a memory shifts a little each time it is called
+    up, toward the present mood, and faster under stress -- which is why a bad
+    stretch makes the whole of the past look worse, and why a unit's account of
+    an old event stops matching what the simulation recorded happening.
+    """
+    if mood is None:
+        return
+    # Vivid episodes resist being rebuilt; forgettable ones are mostly gaps
+    # already. And drift saturates -- past a point a memory is a feeling with
+    # a caption, and there is nothing left to distort.
+    rate = (0.04 + 0.10 * stress) * (1.0 - 0.6 * ep.salience) * (1.0 - ep.drift)
+    for e, now in mood.items():
+        was = ep.emotions.get(e, 0.0)
+        if was or now > 0.05:
+            ep.emotions[e] = max(0.0, min(1.0, was + rate * (now - was)))
+    ep.drift = min(1.0, ep.drift + rate)
 
 
 @dataclass
@@ -114,7 +138,8 @@ class Memory:
             score += 0.40
         return min(1.0, score)
 
-    def recall(self, now, k=4, rehearse=False, vivid_only=False, **cue):
+    def recall(self, now, k=4, rehearse=False, vivid_only=False, mood=None,
+               stress=0.0, **cue):
         """The memories this situation brings up, strongest first.
 
         `rehearse` only for deliberate recall. Evaluating options cues memory
@@ -140,6 +165,7 @@ class Memory:
             ep.recalls += 1
             if rehearse:
                 ep.salience = min(1.0, ep.salience + 0.002)
+                _reconstruct(ep, mood, stress)
             out.append((strength, ep))
         return out
 

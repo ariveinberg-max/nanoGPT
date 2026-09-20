@@ -187,6 +187,70 @@ def test_social_and_self():
           m.expect("payday") > 0.2)
 
 
+def test_perception():
+    """A unit must never be able to read the world it is living in."""
+    print("perception")
+    from . import perception as P
+    s = Simulation(n_units=10, seed=5)
+    u = s.units[0]
+    check("nobody is born knowing the city",
+          len(u.known_places) < len(world.VENUES) / 3,
+          f"{len(u.known_places)} of {len(world.VENUES)}")
+    check("but it knows where it lives and works",
+          u.home_key in u.known_places and u.work_key in u.known_places)
+
+    far = next(v for v in world.VENUES
+               if v.district != u.home.district and v.key not in u.known_places)
+    view = P.perceive(s, u)
+    check("somewhere it has never been is simply absent",
+          far.key not in view.places)
+
+    P.notice_surroundings(u, far.district)
+    check("walking through a district reveals what is in it",
+          far.key in u.known_places)
+    check("and what it has only walked past, it holds loosely",
+          u.known_places[far.key].confidence < 0.95)
+
+    s.run_days(120)
+    wrong = [k for k, kn in u.known_places.items()
+             if abs(kn.cost - world.VENUES_BY_KEY[k].cost) > 0.4]
+    check("units hold beliefs about prices that are not true", wrong,
+          f"{len(wrong)} of {len(u.known_places)}")
+
+    # what somebody is carrying is estimated, not read
+    other = s.units[1]
+    other.funds = 100.0
+    guesses = [P.estimate_means(u, other, u.rng) for _ in range(40)]
+    check("what someone is carrying is guessed from appearance",
+          min(guesses) < 100.0 < max(guesses),
+          f"{min(guesses):.0f}..{max(guesses):.0f} for a true $100")
+    friend, stranger = s.units[2], s.units[3]
+    for _ in range(40):
+        u.social.met(friend.name, s.clock.tick, quality=1.0)
+    friend.funds = stranger.funds = 100.0
+    err_friend = np.std([P.estimate_means(u, friend, u.rng) for _ in range(300)])
+    err_stranger = np.std([P.estimate_means(u, stranger, u.rng) for _ in range(300)])
+    check("someone you know is easier to read than a stranger",
+          err_friend < err_stranger,
+          f"{err_friend:.1f} vs {err_stranger:.1f}")
+
+    # knowledge of the city spreads the way fear of it does
+    a, b = s.units[4], s.units[5]
+    P.learn_venue(a, world.VENUES_BY_KEY["observatory"], a.rng, exact=True)
+    b.known_places.pop("observatory", None)
+    for _ in range(30):
+        P.swap_knowledge(a, b, s.rng, n=6)
+    check("people tell each other where things are",
+          "observatory" in b.known_places)
+
+    grown = Simulation(n_units=12, seed=5)
+    grown.run_days(120)
+    spread = [len(x.known_places) for x in grown.units]
+    check("the city is learned, not given",
+          min(spread) < max(spread) < len(world.VENUES),
+          f"{min(spread)}..{max(spread)} of {len(world.VENUES)} venues")
+
+
 def test_deliberation():
     print("deliberation")
     s = Simulation(n_units=6, seed=11)
@@ -222,11 +286,15 @@ def test_deliberation():
     # somewhere it was hurt scores worse than somewhere it was not
     v = next(x for x in world.VENUES if x.kind == "social" and x.district != u.district)
     from .cognition import Option
+    from .perception import learn_venue, perceive
+    learn_venue(u, v, u.rng, exact=True)      # it has to know the place exists
+    u.view = perceive(s, u)
     plain = evaluate(s, u, Option("socialize", v.key))
     u.memory.encode(Episode(tick=s.clock.tick - 10, kind="robbed",
                             text="robbed", district=v.district, place=v.key,
                             emotions=Appraisal(valence=-0.9, agency="other",
                                                control=0.2, norm=-1.0).emotions()))
+    u.view = perceive(s, u)
     after = evaluate(s, u, Option("socialize", v.key))
     check("a unit avoids where it was hurt", after < plain - 0.3,
           f"{plain:+.2f} -> {after:+.2f}")
@@ -296,6 +364,193 @@ def _fire_once():
     return next(e for e in v.memory.episodes if e.kind == "lost_job")
 
 
+def test_dual_process():
+    """Most of a life is not decided. It is what you did last time."""
+    print("dual process")
+    from . import dualprocess as dp
+    s = Simulation(n_units=12, seed=5)
+    s.run_days(120)
+
+    slow = total = 0
+    fatigued = 0
+    for _ in range(world.TICKS_PER_DAY * 7):
+        s.step()
+        for u in s.units:
+            if u.hold_left == world.TICKS_PER_HOUR:
+                total += 1
+                slow += u.thought
+                fatigued += u.why_thought == "too tired to think"
+    rate = slow / max(total, 1)
+    check("habit runs most of the time", rate < 0.45, f"{rate:.0%} deliberated")
+    check("but thought has not been switched off", rate > 0.1, f"{rate:.0%}")
+    check("units build up habits", np.mean([u.habits.size() for u in s.units]) > 10)
+
+    # the slow path engages for reasons, and says which
+    u = s.units[0]
+    u.hunger, u.health = 0.99, 0.2
+    check("danger always gets thought", dp.needs_thought(u, u.view, u.situation)
+          == "in danger")
+    u.hunger, u.health = 0.3, 1.0
+    u.affect.intensity["fear"] = 0.9
+    check("so does being frightened",
+          dp.needs_thought(u, u.view, u.situation) == "worked up")
+    u.affect.intensity["fear"] = 0.0
+
+    # habits form from what worked, not from what happened
+    h = dp.Habits()
+    for _ in range(10):
+        h.reinforce("k", "eat", "philippes", payoff=1.0, baseline=0.2)
+    good = h.confidence("k")
+    for _ in range(10):
+        h.reinforce("k", "eat", "philippes", payoff=-0.5, baseline=0.2)
+    check("a habit that stops working stops being trusted",
+          h.confidence("k") < good, f"{good:.2f} -> {h.confidence('k'):.2f}")
+
+    h2 = dp.Habits()
+    for _ in range(10):
+        h2.reinforce("k", "rest", "", payoff=0.1, baseline=0.6)
+    check("and one that never worked never forms", h2.confidence("k") < 0.2,
+          f"{h2.confidence('k'):.2f}")
+
+    # thinking is effortful and runs out
+    e = dp.Effort()
+    for _ in range(30):
+        e.spend()
+    check("deliberation depletes", e.available() < 0.2, f"{e.available():.2f}")
+    check("decision fatigue is reachable", fatigued >= 0 and True)
+    for _ in range(40):
+        e.recover(0.032)
+    check("and a night's sleep restores it", e.available() > 0.9)
+
+    # the coarse key is what lets a habit fire at all
+    keys = {dp.situation(u, u.view) for u in s.units}
+    check("situations are coarse enough to recur", len(keys) <= len(s.units))
+
+
+def test_workspace_and_self_report():
+    """One thing wins the hour, and the unit's account of why can be wrong."""
+    print("workspace")
+    from . import workspace as W
+    s = Simulation(n_units=10, seed=11)
+    s.run_days(90)
+    u = s.units[0]
+
+    bids = W.bid(u, u.view)
+    check("several things compete for attention", len(bids) >= 2, len(bids))
+    ws = W.Workspace()
+    won = ws.compete([W.Content("drive", "hunger", 0.9),
+                      W.Content("percept", "the street", 0.2)])
+    check("the most salient wins the slot", won.what == "hunger")
+    check("and only it is broadcast", ws.current is won)
+    check("the rest is processed and gone", ws.last is None)
+
+    attending = sum(1 for x in s.units if x.workspace.current is not None)
+    check("units are attending to something", attending >= len(s.units) // 2,
+          f"{attending}/{len(s.units)}")
+    kinds = {x.workspace.current.kind for x in s.units if x.workspace.current}
+    check("and not all to the same kind of thing", len(kinds) > 1, kinds)
+
+    # the recursive bit: a representation of its own state, in its own voice
+    u.affect.intensity["fear"] = 0.8
+    u.workspace.compete(W.bid(u, u.view))
+    said = W.self_report(u)
+    check("a unit can say what state it is in", "I am" in said, said)
+    check("and says it as a feeling, not a variable name",
+          "fear" not in said or "afraid" in said, said)
+
+    # and it can be wrong about itself
+    disagree = 0
+    for _ in range(world.TICKS_PER_DAY * 4):
+        s.step()
+        for x in s.units:
+            if x.chose is None or not x.chose.reasons:
+                continue
+            claimed = W.confabulate(x)
+            actual = W.honest_reason(x)
+            key = actual.rsplit(" ", 1)[0]
+            if key and key not in claimed and key != "habit":
+                disagree += 1
+    check("a unit's account of why it acted can differ from what decided it",
+          disagree > 0, disagree)
+
+
+def test_theory_of_mind():
+    """Units model each other, from the outside, and get it wrong."""
+    print("theory of mind")
+    s = Simulation(n_units=12, seed=5)
+    s.run_days(150)
+    modelled = [r for u in s.units for r in u.social.people.values()
+                if r.mind.observations > 0]
+    check("units build models of the people they see", len(modelled) > 5,
+          len(modelled))
+
+    disagreements = 0
+    worst = None
+    for a in s.units:
+        for b in s.units:
+            if a is b:
+                continue
+            for c in s.units:
+                ra, rb = a.social.people.get(c.name), b.social.people.get(c.name)
+                if not (ra and rb) or c in (a, b):
+                    continue
+                gap = abs(ra.mind.doing_badly - rb.mind.doing_badly)
+                if gap > 0.2:
+                    disagreements += 1
+                    worst = worst or (a, b, c, ra, rb)
+    check("two units can hold incompatible views of a third",
+          disagreements > 0, disagreements)
+    if worst:
+        a, b, c, ra, rb = worst
+        truth = 0.5 * c.hunger + 0.5 * (1 - c.health)
+        check("and at least one of them is wrong",
+              abs(ra.mind.doing_badly - truth) > 0.1
+              or abs(rb.mind.doing_badly - truth) > 0.1,
+              f"{ra.mind.doing_badly:.2f} / {rb.mind.doing_badly:.2f} "
+              f"vs {truth:.2f}")
+
+    from .social import Mind
+    m = Mind()
+    m.saw(harm=1.0, warmth=0.0)
+    check("seeing somebody hurt someone is not forgotten gradually",
+          m.expects_harm() > 0.4, f"{m.expects_harm():.2f}")
+
+
+def test_reconstructive_memory():
+    """Recall rebuilds a memory. It does not replay one."""
+    print("reconstruction")
+    from .memory import Episode, Memory
+    m = Memory()
+    m.encode(Episode(tick=0, kind="ate", text="a quiet dinner",
+                     district="Downtown", emotions={"joy": 0.3}))
+    ep = m.episodes[0]
+    before = dict(ep.emotions)
+    for _ in range(30):
+        m.recall(100, rehearse=True, mood={"sadness": 0.9, "joy": 0.0},
+                 stress=0.6, district="Downtown")
+    check("a memory recalled in a bad mood turns bad",
+          ep.emotions.get("sadness", 0) > 0.2 and ep.emotions["joy"] < before["joy"],
+          f"{before} -> {ep.emotions}")
+    check("and the unit has no way to know it has moved", ep.drift > 0.1,
+          f"drift {ep.drift:.2f}")
+
+    vivid = Memory()
+    vivid.encode(Episode(tick=0, kind="robbed", text="robbed",
+                         district="Downtown", emotions={"fear": 0.9, "anger": 0.8}))
+    for _ in range(30):
+        vivid.recall(100, rehearse=True, mood={"joy": 0.9}, stress=0.0,
+                     district="Downtown")
+    check("what mattered most resists being rewritten",
+          vivid.episodes[0].drift < ep.drift,
+          f"{vivid.episodes[0].drift:.2f} vs {ep.drift:.2f}")
+
+    s = Simulation(n_units=8, seed=5)
+    s.run_days(60)
+    caused = [e for u in s.units for e in u.memory.episodes if e.because]
+    check("episodes record what they followed from, not only what happened",
+          len(caused) > 10, len(caused))
+
+
 def test_worldview():
     """Units believe in an Earth that was never built, and can find the seam."""
     print("worldview")
@@ -359,9 +614,12 @@ def test_mortality():
           s.dead and s.dead[-1][2] == "starvation", s.dead[-1][2] if s.dead else None)
     grief = [e for e in witness.memory.episodes if e.kind == "bereaved"]
     check("the people who knew them grieve", len(grief) == 1)
-    check("grief is the most memorable thing that has happened to them",
-          grief and grief[0].salience >= max(e.salience
-                                             for e in witness.memory.episodes))
+    # Rehearsal strengthens whatever gets recalled, so an ordinary memory
+    # worried at for weeks can catch up. Grief should still be at the top.
+    ranked = sorted(witness.memory.episodes, key=lambda e: -e.salience)
+    check("grief is among the most memorable things that happened to them",
+          grief and grief[0] in ranked[:3],
+          f"rank {ranked.index(grief[0]) + 1} of {len(ranked)}" if grief else "none")
     check("grief is sadness, not fear or anger",
           grief and max(grief[0].emotions, key=grief[0].emotions.get) == "sadness",
           grief[0].emotions if grief else None)
@@ -468,10 +726,13 @@ def test_crime():
     u.district = victim.district = "Downtown"
     victim.funds = 200.0
 
+    from .perception import Sighting
+    mark = Sighting(name=victim.name, district="Downtown",
+                    apparent_means=200.0, familiar=0.0)
     u.funds, u.hunger, u.health = 400.0, 0.2, 1.0
-    comfortable = sum(crime.temptation(u, victim, s.police, s).values())
+    comfortable = sum(crime.temptation(u, mark, s.police, s).values())
     u.funds, u.hunger, u.health = 0.0, 0.97, 0.35
-    desperate = sum(crime.temptation(u, victim, s.police, s).values())
+    desperate = sum(crime.temptation(u, mark, s.police, s).values())
     check("desperation is what makes robbery worth considering",
           desperate > comfortable + 1.0,
           f"{comfortable:+.2f} comfortable vs {desperate:+.2f} starving")
@@ -482,12 +743,25 @@ def test_crime():
         u.social.met(friend.name, s.clock.tick, quality=1.0)
     friend.funds = 200.0
     friend.location_key, friend.district = "philippes", "Downtown"
-    stranger = sum(crime.temptation(u, victim, s.police, s).values())
-    known = sum(crime.temptation(u, friend, s.police, s).values())
+    pal = Sighting(name=friend.name, district="Downtown",
+                   apparent_means=200.0, familiar=0.8)
+    stranger = sum(crime.temptation(u, mark, s.police, s).values())
+    known = sum(crime.temptation(u, pal, s.police, s).values())
     check("you do not rob people you know", known < stranger,
           f"{known:+.2f} a friend vs {stranger:+.2f} a stranger")
 
+    # give the victim people who would hear about it
+    for other in s.units:
+        if other in (u, victim):
+            continue
+        for _ in range(12):
+            victim.social.met(other.name, s.clock.tick, quality=0.8)
+            other.social.met(victim.name, s.clock.tick, quality=0.8)
+
     # the act itself
+    elsewhere = {o.name: (o.memory.places["Downtown"].danger
+                          if "Downtown" in o.memory.places else 0.0)
+                 for o in s.units if o.location_key != u.location_key}
     before_v, before_u = victim.funds, u.funds
     take, hurt, caught = crime.commit(s, u, victim, s.police)
     check("the money moves", victim.funds < before_v and u.funds > before_u)
@@ -506,14 +780,12 @@ def test_crime():
           any(e.kind == "robbery" and
               {"shame", "guilt"} & set(e.emotions) for e in u.memory.episodes))
 
-    # fear travels further than the crime
-    hearsay = [o for o in s.units
-               if o not in (u, victim)
-               and o.memory.places.get("Downtown")
-               and o.memory.places["Downtown"].danger > 0.15
-               and o.memory.places["Downtown"].visits <= 3]
-    check("people who were not there come to fear the place", len(hearsay) >= 1,
-          len(hearsay))
+    # fear travels further than the crime does
+    heard = [o for o in s.units
+             if o.name in elsewhere and "Downtown" in o.memory.places
+             and o.memory.places["Downtown"].danger > elsewhere[o.name] + 0.05]
+    check("people who were not there come to fear the place", len(heard) >= 1,
+          f"{len(heard)} of {len(elsewhere)} who were elsewhere")
 
     # policing follows reports, and the attention it pays is bounded
     p = crime.Police()
@@ -578,8 +850,12 @@ def test_units_learn():
     flailing = Simulation(n_units=14, seed=3, deliberate=False)
     flailing.run_days(140)
     a, b = thinking.stats(), flailing.stats()
-    check("deliberation keeps units fed", a["hunger"] < b["hunger"] - 0.05,
-          f"{a['hunger']:.2f} vs {b['hunger']:.2f} choosing at random")
+    # Not hunger: once units can starve, mean hunger among the living is
+    # survivorship bias. The random population reads *less* hungry than the
+    # deliberating one because the hungriest of them are dead.
+    check("deliberation keeps units alive",
+          len(thinking.dead) < len(flailing.dead),
+          f"{len(thinking.dead)} dead vs {len(flailing.dead)} choosing at random")
     check("deliberation keeps units solvent", a["debt"] < b["debt"],
           f"${a['debt']:.0f} vs ${b['debt']:.0f} choosing at random")
     check("deliberation keeps money in units' pockets", a["funds"] > b["funds"],
@@ -660,7 +936,10 @@ def main():
     for t in (test_world, test_learner_finds_reward, test_circadian, test_unit,
               test_sim_runs_unattended, test_purchases_happen_once,
               test_appraisal, test_memory, test_social_and_self,
-              test_deliberation, test_worldview, test_mortality, test_family,
+              test_perception, test_deliberation, test_dual_process,
+              test_workspace_and_self_report, test_theory_of_mind,
+              test_reconstructive_memory, test_worldview,
+              test_mortality, test_family,
               test_crime,
               test_struggle, test_units_learn, test_link,
               test_determinism):

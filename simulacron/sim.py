@@ -13,7 +13,7 @@ events for the unit to appraise, feel and remember.
 
 import numpy as np
 
-from . import cognition, crime, family, lifecourse, world
+from . import cognition, crime, family, lifecourse, perception, world
 from .affect import Appraisal
 from .brain import INTENTS, Learner, Policy
 from .unit import N_OBS, Unit, circadian, pick_job
@@ -110,7 +110,7 @@ class Simulation:
         obs = u.observe(self.clock)
         action, record = u.policy.act(obs)          # habit layer, for learning
         if self.deliberating:
-            option = cognition.deliberate(self, u)
+            option = cognition.decide(self, u)
         else:
             option = cognition.flail(self, u)
         u.intent = option.intent
@@ -132,8 +132,12 @@ class Simulation:
             return                      # the hour starts when the unit arrives
         u.hold_left -= 1
         if u.hold_left <= 0:
-            u.learner.record(u.pending_record, u.pending_reward / DECISION_TICKS)
-            u.selfmodel.outcome(u.intent, u.pending_reward / DECISION_TICKS)
+            payoff = u.pending_reward / DECISION_TICKS
+            u.learner.record(u.pending_record, payoff)
+            u.surprise = abs(u.selfmodel.outcome(u.intent, payoff))
+            if u.situation:
+                u.habits.reinforce(u.situation, u.intent, u.target, payoff,
+                                   baseline=u.learner.recent_reward())
             u.pending_record = None
             u.pending_reward = 0.0
 
@@ -143,6 +147,7 @@ class Simulation:
             u.location_key = u.travel_to
             u.district = world.VENUES_BY_KEY[u.travel_to].district
             u.travel_to = ""
+            perception.notice_surroundings(u, u.district)
             if not u.linked:
                 self._perform(u, crowd, first=True)
         u.decay(self.clock)
@@ -224,6 +229,9 @@ class Simulation:
                         # showing up for someone is what moves trust
                         u.social.treated(other.name, clock.tick, valence=0.22)
                         other.social.treated(u.name, clock.tick, valence=0.22)
+                        perception.swap_knowledge(u, other, self.rng)
+                        u.social.of(other.name).mind.saw(help=0.75, warmth=0.75)
+                        other.social.of(u.name).mind.saw(help=0.75, warmth=0.75)
                         u.selfmodel.did("social", True)
                         cognition.experience(
                             self, u, "company", f"spent time with {other.name} at {here.name}",
@@ -506,6 +514,7 @@ class Simulation:
             parent.social.of(child.name).familiarity = 1.0
             child.social.of(parent.name).familiarity = 1.0
             child.social.of(parent.name).trust = 0.95
+            child.social.of(parent.name).mind.saw(help=0.9, warmth=0.95)
             cognition.experience(
                 self, parent, "birth", f"{child.name} was born",
                 Appraisal(valence=0.9, agency="self", norm=0.8),
@@ -516,6 +525,7 @@ class Simulation:
 
     def _provide(self, u):
         """A parent feeding the people who cannot feed themselves."""
+        u.saw_dependents(self.by_name, self.clock.tick)
         kids = u.family.dependents(self.by_name)
         for child in kids:
             if child.hunger < 0.45 or u.funds < world.HOME_MEAL_COST:

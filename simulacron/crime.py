@@ -85,14 +85,15 @@ class Police:
                 f"  arrests {self.arrests.get(d,0):3d}" for d, w in rows]
 
 
-def temptation(u, victim, police, sim):
+def temptation(u, seen, police, sim):
     """What the unit expects to get, and what it expects it to cost.
 
     Returned as a dict so the reasons show up in the option's own accounting,
     like every other term.
     """
-    take = min(victim.funds, 3 * world.DAILY_COST)
-    seen = police.presence(u.district)
+    # What they look like they are carrying, not what they are carrying.
+    take = min(seen.apparent_means, 3 * world.DAILY_COST)
+    watched = police.presence(u.district)
     # Conscience has a floor. Written as a single product of self-concept
     # terms it decayed quadratically with each offence -- past about half an
     # offender identity it reached zero, and the unit robbed somebody every
@@ -102,17 +103,17 @@ def temptation(u, victim, police, sim):
         * (0.35 + 0.65 * u.selfmodel.roles["worker"])
     r = {
         "take": 1.6 * min(1.0, take / (2 * world.DAILY_COST)),
-        "desperation": 2.6 * u.peril() + 2.2 * u.dependents_need(sim.by_name),
-        "risk": -2.2 * seen * (0.4 + 0.6 * (1.0 - u.affect.stress)),
+        "desperation": 2.6 * u.peril() + 2.2 * u.dependents_worry(),
+        "risk": -2.2 * watched * (0.4 + 0.6 * (1.0 - u.affect.stress)),
         "conscience": -(1.3 + 2.6 * identity),
     }
     # A well you have already been down. They have nothing left and they are
     # watching for you.
     recent = sum(1 for e in u.memory.episodes[-40:]
-                 if e.kind == "robbery" and victim.name in e.people)
+                 if e.kind == "robbery" and seen.name in e.people)
     if recent:
         r["been here"] = -1.1 * min(recent, 4)
-    rel = u.social.people.get(victim.name)
+    rel = u.social.people.get(seen.name)
     if rel is not None and rel.familiarity > 0.2:
         r["known to me"] = -2.6 * rel.closeness()
     return r
@@ -142,8 +143,11 @@ def commit(sim, u, victim, police):
         place=victim.location_key, people=(u.name,))
     victim.selfmodel.endorse("victim", 0.3)
     victim.social.treated(u.name, sim.clock.tick, valence=-0.9, betrayal=0.8)
+    victim.social.of(u.name).mind.saw(harm=1.0, help=0.0, warmth=0.0)
 
     for w in crowd:
+        # witnesses update what they think this person is capable of
+        w.social.of(u.name).mind.saw(harm=0.85, warmth=0.15)
         cognition.experience(
             sim, w, "witnessed", f"saw someone robbed in {district}",
             Appraisal(valence=-0.45, agency="other", norm=-1.0, control=0.3,

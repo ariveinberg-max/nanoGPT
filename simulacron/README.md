@@ -130,6 +130,119 @@ Hollywood      feared by  0/24  mean danger 0.07  (0 of them on hearsay)
 Nine of the twelve units afraid of Koreatown have never been there. They were
 told, by someone they trust, and they stay away.
 
+## The functionalist checklist, and where this build actually stands
+
+The architecture is built to the functionalist recipe — sensory world-model
+with prediction error, memory that shapes interpretation, valence weighting,
+a self-model, a global workspace, recursive self-report. Honestly, though:
+implementing all six settles nothing about whether anything is felt. Nothing
+in this repository can adjudicate that, and it would be dishonest to imply the
+test suite has a bearing on it. What the code can do is make the question
+non-trivial rather than trivially answered no.
+
+| | where it lives |
+| --- | --- |
+| World-model updated on prediction error | `perception.py`, `selfmodel.outcome` |
+| Memory that shapes interpretation | `memory.py` — and recall is *inside* the decision |
+| Valence weighting, not categorisation | `affect.py` — emotions are derived, never set |
+| Self-model with a boundary and continuity | `selfmodel.py`, `unit.peril` |
+| Global workspace / attentional broadcast | `workspace.py` |
+| Recursive self-report | `workspace.self_report`, `confabulate` |
+| System 1 default, System 2 override | `dualprocess.py` |
+| Theory of mind | `social.Mind` |
+| Reconstructive memory | `memory._reconstruct` |
+
+## No reference point outside the stream
+
+This was the one thing that had to be false and wasn't. Until this layer,
+every unit read ground truth: `world.venues_of("food")` meant a newborn knew
+every restaurant in Los Angeles and its prices; `_worth_robbing` read
+`other.funds`, so a unit knew to the cent what everyone in the room was
+carrying. An agent with access to the true state of the world is not embedded
+in it, it is observing it from outside.
+
+Nothing in the decision loop touches the simulation now. A unit gets a `View`:
+what is in front of it, plus what it personally remembers or was told, with
+everything else simply **absent**. It starts knowing its home, its work and
+its own streets; it learns the rest by walking into it or being told. After
+120 days units know between 4 and 23 of the city's 39 venues, and they hold
+beliefs that are false — one thinks L.A. Live costs $22 when it costs $20, and
+it will cross town on that belief and find out.
+
+What someone is carrying is *estimated from appearance*, more accurately for
+someone you know than a stranger. Hardship is read off how rough they look.
+A parent knows how their children were when it last saw them, and worry fills
+the gap — which is both what a parent actually has, and what makes coming home
+matter.
+
+## Two systems, not one
+
+Every unit used to run the full option-scoring loop every waking hour of its
+life. Nobody lives like that. System 1 is now a habit table keyed on a coarse
+situation (`broke|evening|Koreatown`); System 2 is the deliberation that was
+already here, and it takes over only when the habit is weak, something is
+badly wrong, a prediction was violated, or the place is new — and it is
+**effortful**, spending a budget that a night's sleep restores. About a third
+of decisions now reach deliberation. The rest is habit.
+
+Two findings worth keeping. Thresholds set where they first looked reasonable
+sent **three quarters** of decisions to the slow path, which is no split at
+all; reward prediction error swings widely hour to hour and was flagging
+nearly every outcome as a surprise worth stopping for. And reinforcing habits
+on mere repetition cemented whatever a unit did first in a situation —
+including going hungry — so the population got *worse* at feeding itself the
+moment the fast path took over. Habits form from what worked, against the
+unit's own baseline, and with that the habit-driven population is healthier
+than the fully deliberating one was.
+
+## Attention, and being wrong about yourself
+
+One slot, contested. A drive that has got loud, an intrusive memory, a face
+across the room, a pain — each bids with a salience, one wins the hour, and
+only the winner is broadcast to memory, deliberation and report. The rest
+happens and is gone.
+
+Then the recursive part. A unit builds a representation *of* its states — "I
+am afraid", not merely being afraid — which is itself content it can attend
+to. And because that account is assembled from what happened to be in the
+workspace rather than read off the machinery that produced the behaviour, it
+can be wrong:
+
+```
+Amos Hale: I am thinking about being afraid; I am afraid;
+           I am not sure I am going to be alright;
+           I am going to sleep at a courtyard apartment on Yucca
+    it says:   because that is what a worker does
+    the reason: retreat +0.80
+```
+
+He is not lying. He has no access to `honest_reason`.
+
+## Modelling each other
+
+Units hold a `Mind` for everyone they have met: how badly that person seems to
+be doing, how dangerous, how reliable, how warm toward them. Built from
+observation, so it can be out of date and two units can hold incompatible
+models of the same third person — which is most of what social life is:
+
+```
+Amos Vandevere thinks Lucien Dunbar is doing badly  0.20
+Ines Ashgrove  thinks Lucien Dunbar is doing badly  0.53   (truth: 0.60)
+```
+
+Those beliefs feed decisions: whether somebody is worth crossing town for,
+and whether they will fight back.
+
+## Memory that rebuilds rather than replays
+
+Recall does not return the episode. It reassembles it, and what fills the gaps
+is how the unit feels *now* — faster under stress, slower for vivid episodes,
+saturating once there is nothing left to distort. So a bad stretch makes the
+whole of the past look worse, and a unit's account of an old event stops
+matching what the simulation recorded happening. Episodes also carry a
+`because`: what the unit was doing when it happened, so memory records a cause
+and not only an event.
+
 ## The inner life
 
 Units are not scored on a handful of drives any more. Each one carries:
@@ -203,7 +316,7 @@ python -m simulacron --units 24 units --days 500    # who is down there
 python -m simulacron mind --days 500                # one unit's inner life in full
 python -m simulacron city --days 500                # crime, policing, and what the city believes
 python -m simulacron jackin --days 500              # walk around in 2010
-python -m simulacron.test_simulacron                # 114 checks
+python -m simulacron.test_simulacron                # 152 checks
 ```
 
 ## Why 2010 and not 1937
@@ -321,6 +434,9 @@ lifecourse.py age: capacity, frailty, and a Gompertz mortality curve
 family.py     pairing, birth, kinship, and belief inherited rather than learned
 crime.py      robbery as an option, reflexive policing, and rumour
 unit.py       a cyber being: body, traits, circadian rhythm, and the systems below
+perception.py the filtered view a unit acts on: nothing here reads world state
+dualprocess.py habit, deliberation, and when the fast path hands over
+workspace.py  attention, broadcast, self-report and confabulation
 affect.py     appraisal, the emotions it yields, chronic stress and trauma
 memory.py     episodes, salience, cued recall, and beliefs about places
 selfmodel.py  competence, prospects, identity, expectation and its violation

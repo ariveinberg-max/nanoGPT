@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from . import crime, lifecourse, world
+from . import crime, dualprocess, lifecourse, perception, workspace, world
 from .affect import NEGATIVE, Appraisal
 from .brain import INTENTS
 from .memory import Episode
@@ -64,7 +64,7 @@ def generate(sim, u):
     edge of town questioning the nature of reality, which is a memorable image
     and completely wrong.
     """
-    clock = sim.clock
+    view = u.view = u.view or perception.perceive(sim, u)
     child = u.age < lifecourse.ADULT
     near = u.home.district
     opts = [Option("rest"), Option("sleep", u.home_key)]
@@ -72,36 +72,35 @@ def generate(sim, u):
         # too small to go anywhere or do anything about it
         return opts + [Option("eat", u.home_key)]
 
-    if (u.workplace.open_at(clock.hour) and clock.is_workday and u.employed
-            and lifecourse.can_work(u.age)):
+    job = view.places.get(u.work_key)
+    if (job is not None and job.open_at(view.hour) and view.is_workday
+            and u.employed and lifecourse.can_work(u.age)):
         opts.append(Option("work", u.work_key))
 
-    for v in world.venues_of("food"):
+    for v in view.of_kind("food"):
         if child and v.district != near:
             continue
-        if v.open_at(clock.hour) and v.cost <= u.funds:
+        if v.open_at(view.hour) and v.cost <= u.funds:
             opts.append(Option("eat", v.key))
     if u.funds >= world.HOME_MEAL_COST:
         opts.append(Option("eat", u.home_key))
 
-    crowd = sim.district_population()
-    for v in world.venues_of("social"):
+    for v in view.of_kind("social"):
         if child and v.district != near:
             continue
-        if v.open_at(clock.hour) and v.cost <= u.funds:
-            hoped = _who_might_be_there(u, crowd.get(v.district, ()))
-            opts.append(Option("socialize", v.key, hoped))
-    for v in world.venues_of("civic"):
+        if v.open_at(view.hour) and v.cost <= u.funds:
+            opts.append(Option("socialize", v.key, _who_might_be_there(u, v)))
+    for v in view.of_kind("civic"):
         if child and v.district != near:
             continue
-        if v.open_at(clock.hour):
+        if v.open_at(view.hour):
             opts.append(Option("socialize", v.key))
 
     # Robbery is on the same list as everything else, and is scored by the
     # same machinery. A unit does not enter a criminal mode; it weighs this
     # against going to bed, and mostly goes to bed.
     if not child and u.age < 65:
-        mark = _worth_robbing(sim, u)
+        mark = _worth_robbing(u)
         if mark is not None:
             opts.append(Option("rob", person=mark.name))
 
@@ -113,26 +112,29 @@ def generate(sim, u):
     return opts
 
 
-def _worth_robbing(sim, u):
-    """Somebody here with something on them, if anyone."""
+def _worth_robbing(u):
+    """Somebody here who looks worth it. Looks, not is."""
     best, most = None, 0.0
-    for other in sim._crowd_by_venue().get(u.location_key, ()):
-        if other is u or other.age < lifecourse.ADULT:
-            continue
-        if other.funds > most:
-            best, most = other, other.funds
+    for s in u.view.present:
+        if s.apparent_means > most:
+            best, most = s, s.apparent_means
     return best if most > 0.5 * world.DAILY_COST else None
 
 
-def _who_might_be_there(u, present):
-    """The person this unit is hoping to run into, if it is hoping at all."""
+def _who_might_be_there(u, place):
+    """Who a unit expects to find somewhere, from having found them before.
+
+    An expectation built out of its own history, not a reading of where
+    everyone currently is.
+    """
     best, weight = "", 0.0
-    for other in present:
-        if other is u:
+    for name, rel in u.social.people.items():
+        if rel.closeness() <= weight:
             continue
-        r = u.social.people.get(other.name)
-        if r and r.closeness() > weight:
-            best, weight = other.name, r.closeness()
+        seen_here = sum(1 for e in u.memory.episodes[-60:]
+                        if e.place == place.key and name in e.people)
+        if seen_here:
+            best, weight = name, rel.closeness()
     return best if weight > 0.15 else ""
 
 
@@ -140,7 +142,7 @@ def _who_might_be_there(u, present):
 def evaluate(sim, u, opt):
     """Score one option, recording why."""
     clock = sim.clock
-    v = world.VENUES_BY_KEY.get(opt.venue)
+    v = u.view.places.get(opt.venue)
     r = {}
 
     # --- what it would do for me ------------------------------------------
@@ -160,34 +162,38 @@ def evaluate(sim, u, opt):
         # three-day horizon and no floor, any unit with a small buffer stopped
         # going to work entirely, then lost the job a fortnight later.
         need = 0.25 + 0.75 * (1.0 - min(1.0, u.funds / (8 * world.DAILY_COST)))
-        r["money"] = 1.6 * need * (u.workplace.wage / world.DAILY_COST)
+        r["money"] = 1.6 * need * (v.wage / world.DAILY_COST if v else 1.0)
         r["competence"] = 0.5 * (u.selfmodel.can("work") - 0.5)
         r["duty"] = 0.4 * u.selfmodel.roles["worker"]
         if peril > 0.1 and u.funds < 2 * world.HOME_MEAL_COST:
             r["survival"] = 3.0 * peril      # no money and no time left to lose
-        need = u.dependents_need(sim.by_name)
+        need = u.dependents_worry(sim.clock.tick)
         if need > 0.05:
             r["dependents"] = 3.2 * need     # somebody at home is going hungry
         if u.debt > 0:
             r["debt"] = 0.6 * min(1.0, u.debt / (5 * world.DAILY_COST))
     elif opt.intent == "socialize":
         r["loneliness"] = 1.5 * u.loneliness
-        if u.dependents_need(sim.by_name) > 0.35:
-            r["dependents"] = -1.6 * u.dependents_need(sim.by_name)
+        worry = u.dependents_worry(sim.clock.tick)
+        if worry > 0.35:
+            r["dependents"] = -1.6 * worry
         if opt.person:
             rel = u.social.of(opt.person)
             r["company"] = 1.2 * rel.closeness()
+            # what it expects of them, which is a belief and can be wrong
+            r["expects of them"] = 0.7 * rel.mind.expects_help() \
+                - 1.1 * rel.mind.expects_harm()
         r["social_self"] = 0.4 * (u.selfmodel.can("social") - 0.5)
     elif opt.intent == "errand":
         r["errand"] = 0.25 * u.hunger
     elif opt.intent == "seek":
         r["restlessness"] = 0.4 * u.traits["restlessness"]
     elif opt.intent == "rob":
-        victim = sim.by_name.get(opt.person)
-        if victim is None:
+        seen = u.view.sighting(opt.person)
+        if seen is None:
             r["gone"] = -99.0
         else:
-            r.update(crime.temptation(u, victim, sim.police, sim))
+            r.update(crime.temptation(u, seen, sim.police, sim))
 
     # --- what it would cost me --------------------------------------------
     if v is not None:
@@ -209,7 +215,31 @@ def evaluate(sim, u, opt):
         courage = 0.35 + 0.65 * u.selfmodel.can("coping")
         r["fear"] = -(1.4 * dread + 0.9 * danger) / courage
     if opt.person:
-        r["wariness"] = -1.0 * u.social.of(opt.person).wariness()
+        rel = u.social.of(opt.person)
+        r["wariness"] = -1.0 * rel.wariness()
+        if opt.intent == "rob":
+            # will they fight back, and will they go to the police
+            r["they might"] = -1.3 * rel.mind.expects_harm()
+
+    # --- what has my attention ---------------------------------------------
+    # Only what won the workspace gets to push the decision around. A drive a
+    # unit is not attending to still exists and still decays; it just is not
+    # what this hour is about.
+    att = u.workspace.current
+    if att is not None:
+        if att.kind == "drive" and att.detail.get("drive") == "hunger" \
+                and opt.intent == "eat":
+            r["on my mind"] = 1.1 * att.salience
+        elif att.kind == "drive" and att.detail.get("drive") == "fatigue" \
+                and opt.intent in ("sleep", "rest"):
+            r["on my mind"] = 1.0 * att.salience
+        elif att.kind == "drive" and att.detail.get("drive") == "loneliness" \
+                and opt.intent == "socialize":
+            r["on my mind"] = 1.0 * att.salience
+        elif att.kind == "social" and opt.person == att.detail.get("who"):
+            r["on my mind"] = 0.9 * att.salience
+        elif att.kind == "pain" and opt.intent in ("rest", "sleep"):
+            r["on my mind"] = 0.8 * att.salience
 
     # --- what I am feeling -------------------------------------------------
     if opt.intent in EFFORTFUL:
@@ -271,14 +301,53 @@ def dwell(u):
         u.affect.feel(a.emotions(), scale=0.45)
 
 
-def deliberate(sim, u):
-    """Intrusive recall, then options, then a choice."""
+def decide(sim, u):
+    """The whole decision: fast path first, slow path only if it has to.
+
+    This is the entry point the simulation calls. Most hours it returns a
+    habit without ever enumerating an option.
+    """
+    # deliberate recall, which rebuilds what it touches
+    u.memory.recall(sim.clock.tick, k=2, rehearse=True,
+                    mood=u.affect.intensity, stress=u.affect.stress,
+                    district=u.district)
     ep = u.memory.intrude(sim.clock.tick, u.rng, u.affect.trauma)
     if ep is not None:
         u.affect.feel(ep.emotions, scale=0.35)
         u.rumination += 1
     dwell(u)
+    u.view = perception.perceive(sim, u)
 
+    # Attention first: one thing wins the hour, and only that is broadcast.
+    attended = u.workspace.compete(workspace.bid(u, u.view))
+
+    key = dualprocess.situation(u, u.view)
+    u.situation = key
+    reason = dualprocess.needs_thought(u, u.view, key)
+    if reason and u.effort.available() < 0.12:
+        # too worn down to think it through, whatever the reason
+        reason = ""
+        u.why_thought = "too tired to think"
+    if not reason:
+        habit = u.habits.get(key)
+        if habit is not None and u.habits.confidence(key) >= 0.14:
+            u.thought = False
+            u.why_thought = u.why_thought or "did what it always does"
+            opt = Option(habit.intent, habit.venue)
+            opt.reasons = {"habit": u.habits.confidence(key)}
+            u.considered = [opt]
+            u.chose = opt
+            return opt
+        reason = "nothing to fall back on"
+
+    u.thought = True
+    u.why_thought = reason
+    u.effort.spend()
+    return deliberate(sim, u)
+
+
+def deliberate(sim, u):
+    """The slow path: options, evaluation, choice."""
     u.habit_prior = u.policy.forward(u.observe(sim.clock))[1]
     opts = generate(sim, u)
     for o in opts:
@@ -319,6 +388,7 @@ def deliberate(sim, u):
 def flail(sim, u):
     """The control: the same options, chosen without weighing any of them."""
     dwell(u)
+    u.view = perception.perceive(sim, u)
     u.habit_prior = u.policy.forward(u.observe(sim.clock))[1]
     opts = generate(sim, u)
     best = {}
@@ -361,7 +431,10 @@ def experience(sim, u, kind, text, appraisal, place="", people=()):
         u.affect.trauma = min(1.0, u.affect.trauma + 0.06 * (weight - 0.8))
     district = (world.VENUES_BY_KEY[place].district if place in world.VENUES_BY_KEY
                 else u.district)
+    # what this happened on the back of: the last thing the unit did, which
+    # is how an episode records a because rather than only a what
+    because = u.chose.label() if u.chose is not None else ""
     u.memory.encode(Episode(tick=sim.clock.tick, kind=kind, text=text,
                             place=place, district=district, people=tuple(people),
-                            emotions=emotions), novelty=novelty)
+                            emotions=emotions, because=because), novelty=novelty)
     return emotions

@@ -33,6 +33,13 @@ DECAY = {
 }
 
 # Emotions that push a unit towards or away from effort and company.
+# How a unit would say it, as opposed to how the system stores it.
+ADJECTIVE = {
+    "fear": "afraid", "anger": "angry", "sadness": "sad", "shame": "ashamed",
+    "guilt": "guilty", "joy": "glad", "pride": "proud", "hope": "hopeful",
+    "relief": "relieved", "settled": "alright",
+}
+
 NEGATIVE = ("fear", "anger", "sadness", "shame", "guilt")
 POSITIVE = ("joy", "pride", "hope", "relief")
 WITHDRAWING = ("sadness", "shame", "guilt", "fear")

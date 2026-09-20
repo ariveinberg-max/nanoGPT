@@ -16,7 +16,9 @@ from .brain import INTENTS, N_INTENTS, Learner, Policy
 from .memory import Memory
 from .selfmodel import SelfModel
 from .social import Social
+from .workspace import Workspace
 from . import lifecourse
+from .dualprocess import Effort, Habits
 from .family import Family
 from .worldview import Worldview
 
@@ -97,6 +99,16 @@ class Unit:
     selfmodel: SelfModel = field(default_factory=SelfModel)
     family: Family = field(default_factory=Family)
     rumination: int = 0
+    known_places: dict = field(default_factory=dict)   # what it knows is out there
+    view: object = None                                # this tick's projection
+    habits: Habits = field(default_factory=Habits)     # System 1
+    effort: Effort = field(default_factory=Effort)     # what System 2 spends
+    surprise: float = 0.0                              # last prediction error
+    thought: bool = False                              # did it deliberate?
+    why_thought: str = ""
+    situation: str = ""
+    workspace: Workspace = field(default_factory=Workspace)
+    _dependents_seen: tuple = (0.0, 0)
     week_ticks: int = 0          # ticks worked this week
     job_search: float = 0.0      # effort put into looking
     worldview: Worldview = field(default_factory=Worldview)
@@ -154,6 +166,8 @@ class Unit:
         u.policy = Policy(N_OBS, rng=rng)
         u.learner = Learner(u.policy)
         u.habit_prior = np.full(N_INTENTS, 1.0 / N_INTENTS)
+        from .perception import seed_local_knowledge
+        seed_local_knowledge(u, rng)
         return u
 
     # -- accessors ----------------------------------------------------------
@@ -173,14 +187,31 @@ class Unit:
     def travelling(self):
         return self.travel_left > 0
 
-    def dependents_need(self, by_name):
-        """The worst state anyone who relies on this unit is currently in."""
+    def saw_dependents(self, by_name, tick):
+        """Called when the unit is actually with them. This is the only way it
+        finds out; the rest of the time it is guessing."""
         worst = 0.0
         for name in self.family.children:
             child = by_name.get(name)
             if child is not None and child.age < 14.0:
                 worst = max(worst, 0.7 * child.hunger + 0.6 * child.peril())
-        return min(1.0, worst)
+        self._dependents_seen = (min(1.0, worst), tick)
+
+    def dependents_worry(self, now=None):
+        """How the people at home are, as far as this unit knows.
+
+        It used to read its children's exact hunger from across the city. Now
+        it knows how they were when it last saw them, and worry fills in the
+        gap -- which is both what a parent actually has and what makes coming
+        home matter.
+        """
+        if not self.family.children:
+            return 0.0
+        seen, when = self._dependents_seen
+        if now is None:
+            return min(1.0, seen)
+        hours = max(0.0, (now - when)) / 4.0
+        return min(1.0, seen + 0.012 * hours)
 
     def peril(self):
         """How close this unit is to not being one. 0 safe .. 1 dying.
@@ -259,6 +290,11 @@ class Unit:
             self.health = min(1.0, self.health + 0.0015 * (1.0 - self.frailty))
         if self.pain > 0:
             self.pain = max(0.0, self.pain - 0.004)
+        if self.activity == "asleep":
+            self.effort.recover(0.032)     # a night's sleep restores it
+        elif self.activity in ("resting", "eating"):
+            self.effort.recover(0.010)
+        self.surprise *= 0.97
         self.affect.decay()
         self.social.forget()
         self.alive_ticks += 1
@@ -318,6 +354,11 @@ class Unit:
         beliefs = self.memory.describe_places()
         if beliefs:
             lines.append("  believes    " + beliefs[0])
+        from .workspace import confabulate, honest_reason, self_report
+        lines.append(f"  attending   {self.workspace.current or 'nothing much'}")
+        lines.append(f"  says        {self_report(self)}")
         if self.chose is not None:
-            lines.append(f"  chose       {self.chose.label()} -- {self.chose.why()}")
+            lines.append(f"  chose       {self.chose.label()}")
+            lines.append(f"  its reason  {confabulate(self)}")
+            lines.append(f"  the reason  {honest_reason(self)}")
         return "\n".join(lines)
