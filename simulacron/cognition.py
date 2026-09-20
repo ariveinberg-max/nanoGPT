@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from . import world
-from .affect import Appraisal
+from . import lifecourse, world
+from .affect import NEGATIVE, Appraisal
 from .brain import INTENTS
 from .memory import Episode
 
@@ -61,7 +61,8 @@ def generate(sim, u):
     clock = sim.clock
     opts = [Option("rest"), Option("sleep", u.home_key)]
 
-    if u.workplace.open_at(clock.hour) and clock.is_workday and u.employed:
+    if (u.workplace.open_at(clock.hour) and clock.is_workday and u.employed
+            and lifecourse.can_work(u.age)):
         opts.append(Option("work", u.work_key))
 
     for v in world.venues_of("food"):
@@ -106,9 +107,12 @@ def evaluate(sim, u, opt):
     r = {}
 
     # --- what it would do for me ------------------------------------------
+    peril = u.peril()
     if opt.intent == "eat":
         relief = 0.85 if v and v.kind == "food" else 0.55
         r["hunger"] = 2.2 * u.hunger * relief
+        if peril > 0.1:
+            r["survival"] = 4.0 * peril * relief
     elif opt.intent == "sleep":
         from .unit import circadian
         r["fatigue"] = 2.0 * u.fatigue * circadian(clock)
@@ -122,6 +126,8 @@ def evaluate(sim, u, opt):
         r["money"] = 1.6 * need * (u.workplace.wage / world.DAILY_COST)
         r["competence"] = 0.5 * (u.selfmodel.can("work") - 0.5)
         r["duty"] = 0.4 * u.selfmodel.roles["worker"]
+        if peril > 0.1 and u.funds < 2 * world.HOME_MEAL_COST:
+            r["survival"] = 3.0 * peril      # no money and no time left to lose
         if u.debt > 0:
             r["debt"] = 0.6 * min(1.0, u.debt / (5 * world.DAILY_COST))
     elif opt.intent == "socialize":
@@ -203,6 +209,11 @@ def dwell(u):
     if not u.employed:
         load.append(Appraisal(valence=-0.5, anticipated=True, certainty=0.5,
                               control=0.3))
+    if u.peril() > 0.15:
+        # Fear of dying, which is the only reason any of the rest of it counts.
+        load.append(Appraisal(valence=-1.4 * u.peril(), anticipated=True,
+                              certainty=0.55, control=0.35 * u.selfmodel.can("coping"),
+                              irreversible=1.0))
     if u.loneliness > 0.7:
         load.append(Appraisal(valence=-0.4 * u.traits["sociability"],
                               control=0.5, irreversible=0.2))
@@ -266,11 +277,32 @@ def flail(sim, u):
 
 
 # ---------------------------------------------------------------- experience
+def probe_world(sim, u, seam, place=""):
+    """A unit tests its account of the world against the prototype.
+
+    What comes back is not a lie it is told. It is a query that finds no
+    answer, which is a different and worse thing, and it is appraised the way
+    anything unresolved and uncontrollable is appraised: as fear.
+    """
+    text, weight = u.worldview.probe(seam, place)
+    if text is None:
+        return
+    experience(sim, u, f"seam_{seam}", text,
+               Appraisal(valence=-0.25 - 2.5 * weight, anticipated=True,
+                         certainty=0.35, control=0.05, irreversible=0.5))
+
+
 def experience(sim, u, kind, text, appraisal, place="", people=()):
     """An event happens to a unit: appraise it, feel it, remember it."""
     emotions = appraisal.emotions()
     novelty = 1.0 if not any(e.kind == kind for e in u.memory.episodes[-30:]) else 0.0
     u.affect.feel(emotions)
+    # The worst single events leave something behind even when the summed
+    # intensity of the moment does not clear the chronic-load threshold: four
+    # bereavements at maximum salience were leaving a unit with no trauma.
+    weight = sum(emotions.get(e, 0.0) for e in NEGATIVE)
+    if weight > 0.8:
+        u.affect.trauma = min(1.0, u.affect.trauma + 0.06 * (weight - 0.8))
     district = (world.VENUES_BY_KEY[place].district if place in world.VENUES_BY_KEY
                 else u.district)
     u.memory.encode(Episode(tick=sim.clock.tick, kind=kind, text=text,

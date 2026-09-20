@@ -14,6 +14,7 @@ from .selfmodel import SelfModel
 from .sim import Simulation
 from .social import Social
 from .unit import N_OBS, Unit
+from .worldview import Worldview, inherit
 
 FAILURES = []
 
@@ -273,9 +274,98 @@ def _fire_once():
     v = t.units[0]
     t.clock.tick = 7 * world.TICKS_PER_DAY
     while v.employed:
-        t._week[v.name] = 0
+        t.units[0].week_ticks = 0
         t._daily(v)
     return next(e for e in v.memory.episodes if e.kind == "lost_job")
+
+
+def test_worldview():
+    """Units believe in an Earth that was never built, and can find the seam."""
+    print("worldview")
+    w = Worldview()
+    check("the account starts settled", w.settled() and w.confidence == 1.0)
+    check("a unit believes in places that are not simulated",
+          w.believes_in("New York") and "New York" not in world.DISTRICTS)
+
+    one = Worldview()
+    for _ in range(40):
+        one.probe("edge")
+    many = Worldview()
+    for seam in ("edge", "sky", "horizon", "time"):
+        many.probe(seam)
+    check("worrying at one seam habituates", one.confidence > 0.5,
+          f"40 trips to the water leaves {one.confidence:.2f}")
+    check("independent seams are what actually erode the account",
+          many.confidence < one.confidence,
+          f"four seams {many.confidence:.2f} vs forty trips {one.confidence:.2f}")
+
+    child = inherit(many)
+    check("a child inherits its parent's doubt, softened",
+          many.confidence < child.confidence < 1.0, f"{child.confidence:.2f}")
+
+    s = Simulation(n_units=12, seed=2010)
+    s.run_days(150)
+    shaken = min(s.units, key=lambda u: u.worldview.confidence)
+    check("units out in the world find the edges of it",
+          shaken.worldview.contradictions > 0)
+    check("dissonance is derived from the account, not counted",
+          abs(shaken.dissonance - 2 * (1 - shaken.worldview.confidence)) < 1e-9)
+    check("what a shaken unit remembers most is the seam",
+          any(e.kind.startswith("seam_")
+              for e in sorted(shaken.memory.episodes,
+                              key=lambda e: -e.salience)[:4]))
+
+
+def test_mortality():
+    """Nothing meant anything until units could stop existing."""
+    print("mortality")
+    u = Unit.spawn(np.random.default_rng(2))
+    u.hunger, u.health = 0.95, 0.3
+    high = u.peril()
+    u.hunger, u.health = 0.2, 1.0
+    check("peril tracks how close the end is", high > 0.5 > u.peril(),
+          f"{high:.2f} vs {u.peril():.2f}")
+
+    # starve one unit deliberately and watch the city notice
+    s = Simulation(n_units=8, seed=21)
+    s.run_days(20)
+    victim = s.units[0]
+    witness = max(s.units[1:], key=lambda o: o.social.of(victim.name).familiarity)
+    witness.social.met(victim.name, s.clock.tick, quality=1.0)
+    for _ in range(8):
+        witness.social.met(victim.name, s.clock.tick, quality=1.0)
+    before = len(s.units)
+    victim.health, victim.hunger = 0.0, 0.95
+    s._reap()
+    check("a unit with no health left dies", len(s.units) == before - 1)
+    check("the death is on the record",
+          s.dead and s.dead[-1][2] == "starvation", s.dead[-1][2] if s.dead else None)
+    grief = [e for e in witness.memory.episodes if e.kind == "bereaved"]
+    check("the people who knew them grieve", len(grief) == 1)
+    check("grief is the most memorable thing that has happened to them",
+          grief and grief[0].salience >= max(e.salience
+                                             for e in witness.memory.episodes))
+    check("grief is sadness, not fear or anger",
+          grief and max(grief[0].emotions, key=grief[0].emotions.get) == "sadness",
+          grief[0].emotions if grief else None)
+
+    m = SelfModel()
+    start = m.can("coping")
+    for _ in range(30):
+        m.survived(0.6, 0.2)
+    check("surviving a bad stretch is evidence a unit can cope",
+          m.can("coping") > start and m.close_calls == 30,
+          f"{start:.2f} -> {m.can('coping'):.2f}")
+    check("coping is no longer frozen for every unit alike",
+          m.can("coping") != 0.5)
+
+    thinking = Simulation(n_units=14, seed=5)
+    thinking.run_days(120)
+    flailing = Simulation(n_units=14, seed=5, deliberate=False)
+    flailing.run_days(120)
+    check("thinking about it is what keeps units alive",
+          len(thinking.dead) < len(flailing.dead),
+          f"{len(thinking.dead)} dead vs {len(flailing.dead)} choosing at random")
 
 
 def test_struggle():
@@ -293,7 +383,7 @@ def test_struggle():
         t = Simulation(n_units=1, seed=500 + trial)
         v = t.units[0]
         t.clock.tick = 7 * world.TICKS_PER_DAY
-        t._week[v.name] = 0                      # a week with no work at all
+        t.units[0].week_ticks = 0                      # a week with no work at all
         t._daily(v)
         fired += not v.employed
     check("staying away from work costs a unit the job", 5 < fired < 40, fired)
@@ -373,7 +463,9 @@ def test_link():
     check("the unit noticed the missing hours", u.dissonance > 0,
           f"{u.dissonance:.3f}")
     check("the gap is in its memory",
-          any("cannot account" in m.text for m in u.memory.episodes))
+          any(m.kind == "seam_time" for m in u.memory.episodes))
+    check("missing time costs the unit its account of the world",
+          u.worldview.confidence < 1.0, f"{u.worldview.confidence:.2f}")
 
     second = LinkSession(s, u)
     second.jack_in()
@@ -397,7 +489,8 @@ def main():
     for t in (test_world, test_learner_finds_reward, test_circadian, test_unit,
               test_sim_runs_unattended, test_purchases_happen_once,
               test_appraisal, test_memory, test_social_and_self,
-              test_deliberation, test_struggle, test_units_learn, test_link,
+              test_deliberation, test_worldview, test_mortality,
+              test_struggle, test_units_learn, test_link,
               test_determinism):
         t()
     print()

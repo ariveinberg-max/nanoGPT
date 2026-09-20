@@ -44,10 +44,11 @@ class LinkSession:
         self.open = False
         lost = (self.sim.clock.tick - self.entered_tick) / world.TICKS_PER_HOUR
         if lost >= 0.5:
-            u.remember(self.sim.clock.tick,
-                       f"lost {lost:.1f} hours and cannot account for them",
-                       weight=2.0)
-            u.dissonance = min(2.0, u.dissonance + 0.06 * lost)
+            # Missing hours are a seam like any other: the unit queries its own
+            # account of the day and finds nothing where the afternoon was.
+            from . import cognition
+            for _ in range(1 + int(lost // 3)):
+                cognition.probe_world(self.sim, u, "time")
         return (f"LINK SEVERED after {lost:.1f} simulated hours.\n"
                 f"{u.name} is walking again. Dissonance now "
                 f"{u.dissonance:.2f}.")

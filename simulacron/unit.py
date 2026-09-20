@@ -16,6 +16,8 @@ from .brain import INTENTS, N_INTENTS, Learner, Policy
 from .memory import Memory
 from .selfmodel import SelfModel
 from .social import Social
+from . import lifecourse
+from .worldview import Worldview
 
 FIRST_NAMES = ("Ada", "Vernon", "Ruth", "Cleo", "Hollis", "Marguerite", "Sol",
                "Ines", "Lucien", "Dorothea", "Amos", "Bess", "Rafael", "Ottoline",
@@ -32,7 +34,8 @@ OBS_FIELDS = (
     "valence", "arousal", "stress", "trauma", "drive",
     "esteem", "prospects", "worker_role",
     "hour_sin", "hour_cos", "is_workday", "workplace_open", "employed",
-    "at_home", "at_work", "here_danger", "dissonance",
+    "at_home", "at_work", "here_danger", "world_doubt",
+    "health", "peril", "age",
     "sociability", "diligence", "appetite", "restlessness", "thrift",
 ) + tuple(f"in_{d}" for d in world.DISTRICTS)
 N_OBS = len(OBS_FIELDS)
@@ -77,6 +80,11 @@ class Unit:
     loneliness: float = 0.25
     pain: float = 0.0
     health: float = 1.0
+    age: float = 30.0            # years
+    stage: str = "adult"
+    capacity: float = 1.0
+    frailty: float = 0.1
+    _drives: dict = field(default_factory=lambda: lifecourse.drives(30.0))
     funds: float = 0.0
     debt: float = 0.0
     employed: bool = True
@@ -87,7 +95,9 @@ class Unit:
     social: Social = field(default_factory=Social)
     selfmodel: SelfModel = field(default_factory=SelfModel)
     rumination: int = 0
-    dissonance: float = 0.0
+    week_ticks: int = 0          # ticks worked this week
+    job_search: float = 0.0      # effort put into looking
+    worldview: Worldview = field(default_factory=Worldview)
 
     # -- where it is and what it is doing -----------------------------------
     location_key: str = ""
@@ -113,9 +123,13 @@ class Unit:
 
     # -- construction -------------------------------------------------------
     @classmethod
-    def spawn(cls, rng):
-        home = rng.choice([v for v in world.VENUES if v.kind == "home"])
+    def spawn(cls, rng, age=None, home=None):
+        if home is None:
+            home = rng.choice([v for v in world.VENUES if v.kind == "home"])
         work = pick_job(rng, home.district)
+        if age is None:
+            # arrivals to a city skew young-adult
+            age = float(min(78.0, 18.0 + rng.gamma(2.6, 7.0)))
         traits = {
             "sociability": float(rng.uniform(0.2, 1.0)),
             "diligence": float(rng.uniform(0.2, 1.0)),
@@ -127,8 +141,10 @@ class Unit:
             name=f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}",
             home_key=home.key, work_key=work.key, district=home.district,
             traits=traits, rng=rng, location_key=home.key,
-            funds=world.STARTING_FUNDS,
+            funds=world.STARTING_FUNDS, age=age,
+            employed=lifecourse.can_work(age),
         )
+        u.refresh_stage()
         u.selfmodel.efficacy["work"] = 0.35 + 0.4 * traits["diligence"]
         u.selfmodel.efficacy["social"] = 0.35 + 0.4 * traits["sociability"]
         u.selfmodel.roles["worker"] = 0.3 * traits["diligence"]
@@ -154,6 +170,32 @@ class Unit:
     def travelling(self):
         return self.travel_left > 0
 
+    def peril(self):
+        """How close this unit is to not being one. 0 safe .. 1 dying.
+
+        This is the quantity the rest of the self-preservation machinery is
+        built on. Without something to be afraid *of*, the fear system was
+        weighing shadows.
+        """
+        starving = max(0.0, self.hunger - 0.75) * 4.0
+        sick = max(0.0, 0.5 - self.health) * 2.0
+        return min(1.0, 0.6 * sick + 0.5 * starving + 0.2 * self.pain)
+
+    def dying(self):
+        return self.health <= 0.0
+
+    @property
+    def dissonance(self):
+        """How far the world has come apart from the account it was given.
+
+        Derived rather than stored. It used to be a counter incremented for
+        standing in the right district, which measured location rather than
+        doubt, and it was clipped at 1.0 in the observation while running to
+        2.0, so past the anomaly threshold a unit stopped being able to notice
+        its own worsening.
+        """
+        return 2.0 * (1.0 - self.worldview.confidence)
+
     def wellbeing(self):
         return 1.0 - (self.hunger + self.fatigue + self.loneliness + self.pain) / 4.0
 
@@ -175,7 +217,8 @@ class Unit:
             1.0 if self.location_key == self.home_key else 0.0,
             1.0 if self.location_key == self.work_key else 0.0,
             self.memory.danger_of(self.district),
-            min(self.dissonance, 1.0),
+            1.0 - self.worldview.confidence,
+            self.health, self.peril(), min(self.age / 90.0, 1.0),
             self.traits["sociability"], self.traits["diligence"],
             self.traits["appetite"], self.traits["restlessness"],
             self.traits["thrift"],
@@ -184,12 +227,25 @@ class Unit:
         return np.array(obs, dtype=float)
 
     # -- drives -------------------------------------------------------------
+    def refresh_stage(self):
+        """Re-read what this body is currently capable of. Cheap; done daily."""
+        self.stage = lifecourse.stage(self.age)
+        self.capacity = lifecourse.capacity(self.age)
+        self.frailty = lifecourse.frailty(self.age)
+        self._drives = lifecourse.drives(self.age)
+
     def decay(self, clock):
-        self.hunger = min(1.0, self.hunger + 0.011 * self.traits["appetite"])
-        self.fatigue = min(1.0, self.fatigue + 0.011 * circadian(clock))
-        self.loneliness = min(1.0, self.loneliness + 0.006 * self.traits["sociability"])
-        if self.health < 1.0:
-            self.health = min(1.0, self.health + 0.0015)
+        d = self._drives
+        self.hunger = min(1.0, self.hunger
+                          + 0.011 * self.traits["appetite"] * d["appetite"])
+        self.fatigue = min(1.0, self.fatigue
+                           + 0.011 * circadian(clock) * d["fatigue"])
+        self.loneliness = min(1.0, self.loneliness + 0.006
+                              * self.traits["sociability"] * d["sociability"])
+        if self.health < 1.0 and self.hunger < 0.8:
+            # you do not mend on an empty stomach, and you mend slower late on
+            self.health = min(1.0, self.health + 0.0015 * (1.0 - self.frailty))
+        if self.pain > 0:
             self.pain = max(0.0, self.pain - 0.004)
         self.affect.decay()
         self.social.forget()
@@ -229,18 +285,19 @@ class Unit:
                 10 - int(round(max(0.0, min(1.0, x)) * 10)))
         where = self.location.name if self.location else "in transit"
         lines = [
-            f"{self.name}",
+            f"{self.name} -- {lifecourse.describe(self.age)}",
             f"  lives   {self.home.name} ({self.home.district})",
             f"  works   {self.workplace.name} at ${self.workplace.wage:.2f}/hr"
             + ("" if self.employed else "  [OUT OF WORK]"),
             f"  now at  {where} in {self.district}",
             f"  hunger      [{bar(self.hunger)}]   fatigue [{bar(self.fatigue)}]",
             f"  loneliness  [{bar(self.loneliness)}]   pain    [{bar(self.pain)}]",
+            f"  health      [{bar(self.health)}]   peril   [{bar(self.peril())}]",
             f"  funds       ${self.funds:,.2f}"
             + (f"   debt ${self.debt:,.2f}" if self.debt > 0.01 else ""),
             f"  feeling     {self.affect.describe()}",
             f"  self        {self.selfmodel.narrative(self.affect)}",
-            f"  dissonance  [{bar(min(self.dissonance, 1.0))}]",
+            f"  world       {self.worldview.describe()}",
         ]
         if self.social.people:
             lines.append("  knows       " + "; ".join(self.social.describe(2)))

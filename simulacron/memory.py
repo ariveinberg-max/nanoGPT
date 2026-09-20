@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 HALF_LIFE = 2400.0      # ticks until an ordinary memory is half as reachable
 CAPACITY = 400
+VIVID = 0.22            # below this an episode cannot frighten anyone
 
 
 @dataclass
@@ -50,19 +51,25 @@ class Episode:
 class PlaceBelief:
     danger: float = 0.0             # 0 safe .. 1 something bad happens here
     warmth: float = 0.0             # 0 nothing good .. 1 good things happen here
+    fear: float = 0.0               # the dread the place calls up, consolidated
     visits: int = 0
 
-    def update(self, valence, harm):
+    def update(self, valence, harm, fear=0.0):
         self.visits += 1
         rate = 1.0 / min(self.visits, 12)
         self.danger += rate * (harm - self.danger)
         self.warmth += rate * (max(0.0, valence) - self.warmth)
+        # Dread accrues fast and leaves slowly: one bad night on a street is
+        # enough, and a hundred uneventful ones only partly undo it.
+        self.fear = max(fear, self.fear - 0.004) if fear < self.fear \
+            else self.fear + 0.55 * (fear - self.fear)
 
 
 class Memory:
     def __init__(self):
         self.episodes = []
         self.by_district = {}       # district -> [episode], so recall is local
+        self.vivid = {}             # district -> [episode] worth being afraid of
         self.places = {}            # district -> PlaceBelief
         self.intrusion = None       # an episode that surfaced on its own
         self._dread = {}            # (tick, district, place) -> value
@@ -74,19 +81,24 @@ class Memory:
         ep.salience = min(1.0, 0.08 + 0.75 * ep.intensity() + 0.2 * novelty)
         self.episodes.append(ep)
         self.by_district.setdefault(ep.district, []).append(ep)
+        if ep.salience >= VIVID:
+            self.vivid.setdefault(ep.district, []).append(ep)
         self._dread.clear()
         if ep.district:
             b = self.places.setdefault(ep.district, PlaceBelief())
             harm = ep.emotions.get("fear", 0.0) + ep.emotions.get("anger", 0.0)
-            b.update(ep.intensity() if not harm else -harm, min(1.0, harm))
+            b.update(ep.intensity() if not harm else -harm, min(1.0, harm),
+                     fear=ep.emotions.get("fear", 0.0))
         if len(self.episodes) > CAPACITY:
             # forget the least reachable, not the oldest
             self.episodes.sort(key=lambda e: e.retrievability(ep.tick))
             del self.episodes[:len(self.episodes) - CAPACITY]
             self.episodes.sort(key=lambda e: e.tick)
-            self.by_district = {}
+            self.by_district, self.vivid = {}, {}
             for e in self.episodes:
                 self.by_district.setdefault(e.district, []).append(e)
+                if e.salience >= VIVID:
+                    self.vivid.setdefault(e.district, []).append(e)
 
     # -- retrieval ----------------------------------------------------------
     @staticmethod
@@ -102,7 +114,7 @@ class Memory:
             score += 0.40
         return min(1.0, score)
 
-    def recall(self, now, k=4, rehearse=False, **cue):
+    def recall(self, now, k=4, rehearse=False, vivid_only=False, **cue):
         """The memories this situation brings up, strongest first.
 
         `rehearse` only for deliberate recall. Evaluating options cues memory
@@ -113,7 +125,8 @@ class Memory:
         # Scanning every episode for every option was well over half the
         # simulation's running time. A cue that names a district only needs
         # the episodes from that district.
-        pool = self.by_district.get(cue["district"], ()) if cue.get("district") \
+        index = self.vivid if vivid_only else self.by_district
+        pool = index.get(cue["district"], ()) if cue.get("district") \
             else self.episodes
         scored = []
         for ep in pool:
@@ -131,21 +144,17 @@ class Memory:
         return out
 
     def dread(self, now, **cue):
-        """How much fear this situation calls up from experience alone.
+        """How much fear this place calls up. Consolidated, not recomputed.
 
-        Cached within the tick: deliberation asks about the same few districts
-        once per option, and the answer cannot change in between.
+        This used to scan episodes on every option of every hour and was most
+        of the simulation's running time. It is also the wrong model: nobody
+        re-derives their feeling about a street from the particular nights they
+        spent on it. You retrieve the feeling. The episodes are still there,
+        and still reachable by `recall`, for the things that genuinely need
+        them -- intrusive memory, being asked, meeting someone again.
         """
-        if now != self._dread_tick:
-            self._dread.clear()
-            self._dread_tick = now
-        key = (cue.get("district", ""), cue.get("place", ""))
-        hit = self._dread.get(key)
-        if hit is None:
-            hit = self._dread[key] = sum(
-                strength * ep.emotions.get("fear", 0.0)
-                for strength, ep in self.recall(now, k=6, **cue))
-        return hit
+        b = self.places.get(cue.get("district", ""))
+        return b.fear if b else 0.0
 
     def intrude(self, now, rng, trauma):
         """The worst things come back on their own. Returns an episode or None."""

@@ -26,6 +26,7 @@ class SelfModel:
     prospects: float = 0.0          # -1 it gets worse .. +1 it gets better
     expectation: dict = field(default_factory=dict)   # key -> predicted value
     surprises: int = 0
+    close_calls: int = 0            # times it came near the end and did not
 
     # -- competence ---------------------------------------------------------
     def did(self, domain, success):
@@ -59,6 +60,23 @@ class SelfModel:
             self.surprises += 1
         self.prospects = max(-1.0, min(1.0, self.prospects + 0.02 * surprise))
         return surprise
+
+    def survived(self, was, now):
+        """Came through a bad stretch, or did not.
+
+        This is what finally gives the `coping` belief evidence to move on.
+        It was frozen at exactly 0.5 for every unit in every run, which would
+        have been merely dead code except that `coping` is the courage term
+        dividing fear -- so every unit was identically brave, permanently.
+        """
+        if was < 0.35:
+            return
+        if now < was - 0.15:
+            self.close_calls += 1
+            self.did("coping", True)
+            self.endorse("victim", -0.02)
+        elif now > was + 0.10:
+            self.did("coping", False)
 
     def esteem(self):
         return (sum(self.efficacy.values()) / len(self.efficacy)
