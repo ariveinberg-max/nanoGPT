@@ -1,0 +1,432 @@
+<title>Simulacron Console</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<style>
+:root{
+  --ground:#EDF0F3; --surface:#FFFFFF; --sunk:#E3E8ED;
+  --ink:#141E28; --muted:#5B6A79; --faint:#8A99A7;
+  --line:#D2DAE1; --line-soft:#E4EAEF;
+  --accent:#2E6F7E; --accent-soft:#D7E6E9;
+  --calm:#86A9A6; --unease:#C8853F; --feared:#9E3A2C;
+  --gold:#B08324;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 8px 24px rgba(20,30,40,.06);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E151C; --surface:#18212B; --sunk:#131B23;
+    --ink:#E2E9F0; --muted:#8E9DAB; --faint:#667786;
+    --line:#26323E; --line-soft:#1F2A35;
+    --accent:#5FA9B7; --accent-soft:#1D3840;
+    --calm:#6F9491; --unease:#D08F45; --feared:#C4503D;
+    --gold:#C99C36;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E151C; --surface:#18212B; --sunk:#131B23;
+  --ink:#E2E9F0; --muted:#8E9DAB; --faint:#667786;
+  --line:#26323E; --line-soft:#1F2A35;
+  --accent:#5FA9B7; --accent-soft:#1D3840;
+  --calm:#6F9491; --unease:#D08F45; --feared:#C4503D;
+  --gold:#C99C36;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px;padding-block:20px 40px}
+h1,h2,h3{margin:0;text-wrap:balance}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-variant-numeric:tabular-nums}
+.said{font-family:"IBM Plex Serif",Georgia,serif}
+
+/* ---- masthead ---- */
+.mast{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;
+  border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:18px}
+.mast h1{font-size:19px;font-weight:600;letter-spacing:-.01em}
+.mast .sub{color:var(--muted);font-size:13px}
+.eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint)}
+
+/* ---- transport ---- */
+.transport{background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;padding:12px 14px;display:flex;flex-wrap:wrap;
+  align-items:center;gap:12px;box-shadow:var(--shadow);margin-bottom:16px}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn{background:var(--sunk);border:1px solid var(--line);border-radius:7px;
+  padding:7px 13px;font-weight:500;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.play{background:var(--accent);border-color:var(--accent);color:#fff;min-width:74px}
+.btn:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.clock{font-size:15px;font-weight:600;min-width:168px}
+.clock small{display:block;font-weight:400;font-size:11.5px;color:var(--muted);
+  letter-spacing:.03em}
+input[type=range]{flex:1 1 220px;min-width:160px;accent-color:var(--accent)}
+.speeds{display:flex;gap:4px}
+.speeds .btn{padding:5px 9px;font-size:12px}
+.speeds .btn[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);
+  color:var(--accent);font-weight:600}
+
+/* ---- layout ---- */
+.grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:16px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  box-shadow:var(--shadow);overflow:hidden}
+.panel-head{display:flex;justify-content:space-between;align-items:baseline;
+  gap:10px;padding:12px 14px 0}
+.panel-body{padding:12px 14px 14px}
+
+/* ---- map ---- */
+#plate{display:block;width:100%;height:auto;max-width:100%}
+.dname{font-size:5.4px;font-weight:600;letter-spacing:.02em}
+.dstat{font-size:4.4px;letter-spacing:.04em}
+.district{cursor:pointer}
+.district:hover .dfill{stroke-width:.9}
+
+/* ---- legend ---- */
+.legend{display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  border-top:1px solid var(--line-soft);padding-top:10px;margin-top:4px;
+  font-size:11.5px;color:var(--muted)}
+.ramp{display:flex;align-items:center;gap:6px}
+.ramp i{width:54px;height:8px;border-radius:99px;display:block;
+  background:linear-gradient(90deg,var(--calm),var(--unease),var(--feared))}
+.key{display:inline-flex;align-items:center;gap:5px}
+.key b{width:8px;height:8px;border-radius:99px;display:block;background:var(--accent)}
+.key.child b{width:5px;height:5px}
+.key.peril b{background:var(--feared)}
+
+/* ---- feed ---- */
+#feed{height:226px;overflow-y:auto;margin:0;padding:0;list-style:none;
+  border-top:1px solid var(--line-soft)}
+#feed li{padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;
+  display:flex;gap:9px;align-items:flex-start}
+#feed li:last-child{border-bottom:0}
+#feed .when{color:var(--faint);font-size:10.5px;flex:0 0 74px;padding-top:1px}
+#feed .what{flex:1;min-width:0}
+.tag{display:inline-block;width:3px;align-self:stretch;border-radius:99px;
+  background:var(--line);flex:0 0 3px}
+.tag.crime{background:var(--feared)} .tag.death{background:var(--ink)}
+.tag.birth{background:var(--calm)} .tag.job{background:var(--gold)}
+.tag.anomaly{background:var(--accent)}
+.empty{color:var(--faint);padding:14px 0;font-size:12.5px}
+
+/* ---- vitals ---- */
+.vitals{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:2px 16px}
+.vital{padding:8px 0}
+.vital .n{font-size:19px;font-weight:600;letter-spacing:-.01em}
+.vital .l{font-size:10.5px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+
+/* ---- roster ---- */
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px}
+.card{background:var(--sunk);border:1px solid var(--line-soft);border-radius:8px;
+  padding:9px 10px;text-align:left;width:100%}
+.card:hover{border-color:var(--accent)}
+.card[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent)}
+.card .nm{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.card .rw{display:flex;justify-content:space-between;gap:8px;font-size:11px;
+  color:var(--muted);margin-top:2px}
+.bars{display:flex;gap:3px;margin-top:6px}
+.bars span{height:3px;flex:1;border-radius:99px;background:var(--line)}
+.bars span i{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.bars span.p i{background:var(--feared)}
+
+/* ---- inspector ---- */
+#who{border-top:1px solid var(--line-soft);margin-top:12px;padding-top:12px}
+#who .quote{font-size:15px;line-height:1.55;margin:0 0 10px}
+#who .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  gap:6px 14px;font-size:12px;color:var(--muted)}
+#who .meta b{display:block;color:var(--ink);font-weight:600}
+.hint{color:var(--faint);font-size:12.5px}
+.note{color:var(--muted);font-size:12px;line-height:1.55;margin-top:14px;
+  border-top:1px solid var(--line-soft);padding-top:12px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <h1>Simulacron Console</h1>
+    <div class="sub mono" id="epoch">Los Angeles, March 2010</div>
+    <div class="sub" style="margin-left:auto" id="runinfo"></div>
+  </header>
+
+  <div class="transport">
+    <button class="btn play" id="play" aria-label="Play or pause">Play</button>
+    <div class="clock mono"><span id="stamp">—</span><small id="dayline">—</small></div>
+    <input type="range" id="scrub" min="0" value="0" step="1" aria-label="Time">
+    <div class="speeds" role="group" aria-label="Speed">
+      <button class="btn" data-sp="1">1×</button>
+      <button class="btn" data-sp="4" aria-pressed="true">4×</button>
+      <button class="btn" data-sp="16">16×</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h2 class="eyebrow">The prototype — districts shaded by believed danger</h2>
+        <span class="eyebrow" id="selname"></span>
+      </div>
+      <div class="panel-body">
+        <svg id="plate" viewBox="0 0 100 76" role="img"
+             aria-label="Map of eight districts with units shown as dots"></svg>
+        <div class="legend">
+          <span class="ramp"><i></i> danger the population believes</span>
+          <span class="key"><b></b> a unit</span>
+          <span class="key child"><b></b> a child</span>
+          <span class="key peril"><b></b> in peril</span>
+          <span class="key" style="gap:4px">
+            <svg width="16" height="7" aria-hidden="true"><rect x="0" y="1" width="16" height="5"
+              rx="2.5" fill="none" stroke="var(--accent)" stroke-width="1"/></svg> patrol weight</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2 class="eyebrow">What happened</h2>
+        <span class="eyebrow" id="evcount"></span></div>
+      <div class="panel-body" style="padding-top:8px">
+        <ul id="feed"><li class="empty">Press play.</li></ul>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-head"><h2 class="eyebrow">The population</h2>
+      <span class="eyebrow" id="alive"></span></div>
+    <div class="panel-body">
+      <div class="vitals" id="vitals"></div>
+      <div class="roster" id="roster" style="margin-top:12px"></div>
+      <div id="who"><p class="hint">Select anyone above to look at them.</p></div>
+    </div>
+  </section>
+
+  <p class="note">
+    This is a recording, not a live simulation — the prototype runs in Python and this
+    plays back what it did. Shading is <em>believed</em> danger, averaged across everyone's
+    private beliefs, so a district can go dark without anything happening there: fear
+    travels through the social graph faster than crime does. Patrol follows reported
+    crime and nothing else.
+  </p>
+</div>
+
+<script>
+const T = window.__TRACE__;
+const F = T.frames, D = T.districts, ACT = T.activities, EMO = T.emotions;
+const PEOPLE = T.people;
+const NS = "http://www.w3.org/2000/svg";
+
+const POS = {
+  "Santa Monica":[9,40],"Venice":[11,58],"Hollywood":[44,21],"Silver Lake":[62,20],
+  "Koreatown":[50,41],"Downtown":[72,38],"Boyle Heights":[88,40],"Leimert Park":[52,63]
+};
+const ADJ = T.adjacency;
+const ADJ_NOTE = {"Santa Monica":"the 10","Venice":"the 10"};
+
+const EMO_WORD = {settled:"alright",fear:"afraid",anger:"angry",sadness:"sad",
+  shame:"ashamed",guilt:"guilty",joy:"glad",pride:"proud",hope:"hopeful",relief:"relieved"};
+const ACT_WORD = {idle:"at a loose end",asleep:"asleep",eating:"eating",
+  working:"at work",out:"out",resting:"resting",errands:"running errands",
+  "in transit":"on my way somewhere",robbing:"doing something I should not"};
+
+function ramp(v){
+  const c=[[134,169,166],[200,133,63],[158,58,44]];
+  const t=Math.max(0,Math.min(1,v));
+  const [a,b,k]= t<0.5 ? [c[0],c[1],t*2] : [c[1],c[2],(t-0.5)*2];
+  return `rgb(${a.map((x,i)=>Math.round(x+(b[i]-x)*k)).join(",")})`;
+}
+function tagOf(t){
+  if(/robbed|arrested|released/.test(t))return"crime";
+  if(/died/.test(t))return"death";
+  if(/born|together/.test(t))return"birth";
+  if(/job|work at/.test(t))return"job";
+  if(/ANOMALY/.test(t))return"anomaly";
+  return"";
+}
+
+/* ---------- build the plate once ---------- */
+const plate=document.getElementById("plate");
+const seen=new Set(), shapes={};
+ADJ.forEach(([a,b])=>{
+  const k=[a,b].sort().join("|"); if(seen.has(k))return; seen.add(k);
+  if(!POS[a]||!POS[b])return;
+  const l=document.createElementNS(NS,"line");
+  l.setAttribute("x1",POS[a][0]);l.setAttribute("y1",POS[a][1]);
+  l.setAttribute("x2",POS[b][0]);l.setAttribute("y2",POS[b][1]);
+  l.setAttribute("stroke","var(--line)");l.setAttribute("stroke-width",".45");
+  const road = ADJ_NOTE[a]||ADJ_NOTE[b];
+  if(road)l.setAttribute("stroke-dasharray","1.6 1.2");
+  plate.appendChild(l);
+});
+D.forEach((d,i)=>{
+  const [x,y]=POS[d]||[50,38];
+  const g=document.createElementNS(NS,"g");
+  g.setAttribute("class","district");g.setAttribute("tabindex","0");
+  g.setAttribute("role","button");g.setAttribute("aria-label",d);
+  const r=document.createElementNS(NS,"rect");
+  r.setAttribute("class","dfill");
+  r.setAttribute("x",x-10.5);r.setAttribute("y",y-7.2);
+  r.setAttribute("width",21);r.setAttribute("height",14.4);r.setAttribute("rx",2.2);
+  r.setAttribute("stroke","var(--surface)");r.setAttribute("stroke-width",".45");
+  g.appendChild(r);
+  const pat=document.createElementNS(NS,"rect");
+  pat.setAttribute("x",x-10.5);pat.setAttribute("y",y-7.2);
+  pat.setAttribute("width",21);pat.setAttribute("height",14.4);pat.setAttribute("rx",2.2);
+  pat.setAttribute("fill","none");pat.setAttribute("stroke","var(--accent)");
+  g.appendChild(pat);
+  const nm=document.createElementNS(NS,"text");
+  nm.setAttribute("class","dname");nm.setAttribute("x",x);nm.setAttribute("y",y-3.4);
+  nm.setAttribute("text-anchor","middle");nm.setAttribute("fill","#fff");
+  nm.textContent=d;g.appendChild(nm);
+  const st=document.createElementNS(NS,"text");
+  st.setAttribute("class","dstat mono");st.setAttribute("x",x);st.setAttribute("y",y+6.1);
+  st.setAttribute("text-anchor","middle");st.setAttribute("fill","#fff");
+  st.setAttribute("opacity",".75");g.appendChild(st);
+  const dots=document.createElementNS(NS,"g");g.appendChild(dots);
+  g.addEventListener("click",()=>selectDistrict(d));
+  g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();selectDistrict(d);}});
+  plate.appendChild(g);
+  shapes[d]={fill:r,patrol:pat,stat:st,dots,x,y};
+});
+
+/* ---------- state ---------- */
+let i=0, playing=false, speed=4, sel=null, selD=null, timer=null;
+const scrub=document.getElementById("scrub");
+scrub.max=F.length-1;
+document.getElementById("epoch").textContent="Los Angeles, "+T.meta.epoch;
+document.getElementById("runinfo").textContent =
+  `${T.meta.units} units · ${T.meta.days} days recorded · seed ${T.meta.seed}`;
+
+function draw(){
+  const f=F[i];
+  document.getElementById("stamp").textContent=f.stamp;
+  document.getElementById("dayline").textContent=
+    `day ${f.day} of the prototype`;
+  scrub.value=i;
+
+  D.forEach((d,k)=>{
+    const s=shapes[d];
+    s.fill.setAttribute("fill",ramp(f.fear[k]/100));
+    const pw=f.patrol[k]/1000;
+    s.patrol.setAttribute("stroke-width",(0.25+pw*9).toFixed(2));
+    s.patrol.setAttribute("opacity",(0.25+pw*3).toFixed(2));
+    s.stat.textContent=`${f.here[k]} here · fear ${(f.fear[k]/100).toFixed(2)}`;
+    while(s.dots.firstChild)s.dots.removeChild(s.dots.firstChild);
+  });
+
+  const per={};
+  f.u.forEach((pid,n)=>{
+    const d=D[f.d[n]]; (per[d]=per[d]||[]).push(n);
+  });
+  Object.entries(per).forEach(([d,list])=>{
+    const s=shapes[d]; if(!s)return;
+    list.forEach((n,j)=>{
+      const cols=6, cx=s.x-8.4+(j%cols)*3.4, cy=s.y+1.0+Math.floor(j/cols)*2.6;
+      const c=document.createElementNS(NS,"circle");
+      const child=f.age[n]<18, peril=f.p[n]>25;
+      c.setAttribute("cx",cx);c.setAttribute("cy",cy);
+      c.setAttribute("r",child?0.72:1.12);
+      c.setAttribute("fill",peril?"var(--feared)":"#fff");
+      c.setAttribute("opacity",ACT[f.a[n]]==="asleep"?".42":".95");
+      if(f.u[n]===sel){c.setAttribute("stroke","var(--ink)");c.setAttribute("stroke-width",".55");
+        c.setAttribute("r",1.5);}
+      const ttl=document.createElementNS(NS,"title");
+      ttl.textContent=`${PEOPLE[f.u[n]].name} — ${ACT[f.a[n]]}`;
+      c.appendChild(ttl);
+      s.dots.appendChild(c);
+    });
+  });
+
+  const live=f.u.length;
+  const hungry=f.h.filter(x=>x>70).length, inperil=f.p.filter(x=>x>25).length;
+  const kids=f.age.filter(x=>x<18).length;
+  const money=Math.round(f["$"].reduce((a,b)=>a+b,0)/live);
+  document.getElementById("alive").textContent=`${live} alive`;
+  document.getElementById("vitals").innerHTML=[
+    [live,"alive"],[kids,"children"],[hungry,"going hungry"],
+    [inperil,"in peril"],["$"+money,"median pocket"],
+    [T.dead.filter(x=>x.tick<=f.t).length,"dead"]
+  ].map(([n,l])=>`<div class="vital"><div class="n mono">${n}</div><div class="l">${l}</div></div>`).join("");
+
+  const cards=f.u.map((pid,n)=>{
+    const p=PEOPLE[pid];
+    return `<button class="card" data-p="${pid}" aria-pressed="${pid===sel}">
+      <div class="nm">${p.name}</div>
+      <div class="rw"><span>${ACT[f.a[n]]}</span><span class="mono">${f.age[n]}</span></div>
+      <div class="bars">
+        <span title="hunger"><i style="width:${f.h[n]}%"></i></span>
+        <span class="p" title="peril"><i style="width:${f.p[n]}%"></i></span>
+      </div></button>`;
+  }).join("");
+  document.getElementById("roster").innerHTML=cards;
+  document.querySelectorAll(".card").forEach(b=>
+    b.addEventListener("click",()=>{sel=+b.dataset.p;selD=null;draw();}));
+
+  drawWho(f);
+  document.getElementById("selname").textContent =
+    selD ? selD + " — " + (f.fear[D.indexOf(selD)]/100).toFixed(2) + " believed danger" : "";
+}
+
+function drawWho(f){
+  const el=document.getElementById("who");
+  if(sel===null){el.innerHTML='<p class="hint">Select anyone above to look at them.</p>';return;}
+  const n=f.u.indexOf(sel);
+  if(n<0){el.innerHTML=`<p class="hint">${PEOPLE[sel].name} is no longer in the prototype.</p>`;return;}
+  const p=PEOPLE[sel];
+  el.innerHTML=`
+    <p class="quote said">“I am ${EMO_WORD[EMO[f.e[n]]]}. I am ${ACT_WORD[ACT[f.a[n]]]}.”</p>
+    <div class="meta">
+      <span><b>${p.name}</b>${f.age[n]} years old</span>
+      <span><b>${D[f.d[n]]}</b>where it is now</span>
+      <span><b>${p.home}</b>where it lives</span>
+      <span><b>${p.work}</b>its work</span>
+      <span><b class="mono">${(f.h[n]/100).toFixed(2)}</b>hunger</span>
+      <span><b class="mono">${(f.p[n]/100).toFixed(2)}</b>peril</span>
+      <span><b class="mono">$${f["$"][n]}</b>on it</span>
+    </div>`;
+}
+
+function selectDistrict(d){selD=(selD===d?null:d);draw();}
+
+/* ---------- feed ---------- */
+const feed=document.getElementById("feed");
+let shown=-1;
+function refillFeed(){
+  const items=[];
+  for(let k=Math.max(0,i-400);k<=i;k++)
+    F[k].ev.forEach(e=>items.push([F[k].stamp,e]));
+  const last=items.slice(-60);
+  feed.innerHTML = last.length ? last.map(([w,e])=>{
+    const t=e.replace(/^\[[^\]]*\]\s*/,"");
+    return `<li><span class="tag ${tagOf(t)}"></span><span class="when mono">${w}</span>
+      <span class="what">${t}</span></li>`;
+  }).reverse().join("") : '<li class="empty">Nothing yet.</li>';
+  document.getElementById("evcount").textContent = last.length ? last.length+" recent" : "";
+  shown=i;
+}
+
+/* ---------- transport ---------- */
+function step(){ if(i<F.length-1){i++; draw(); if(F[i].ev.length||i-shown>40)refillFeed();}
+  else stop(); }
+function start(){ playing=true; document.getElementById("play").textContent="Pause";
+  clearInterval(timer); timer=setInterval(step, Math.max(16, 260/speed)); }
+function stop(){ playing=false; document.getElementById("play").textContent="Play";
+  clearInterval(timer); }
+document.getElementById("play").addEventListener("click",()=>playing?stop():start());
+scrub.addEventListener("input",()=>{i=+scrub.value;draw();refillFeed();});
+document.querySelectorAll(".speeds .btn").forEach(b=>b.addEventListener("click",()=>{
+  speed=+b.dataset.sp;
+  document.querySelectorAll(".speeds .btn").forEach(x=>x.setAttribute("aria-pressed",x===b));
+  if(playing)start();
+}));
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT")return;
+  if(e.key===" "){e.preventDefault();playing?stop():start();}
+  if(e.key==="ArrowRight"){stop();i=Math.min(F.length-1,i+1);draw();refillFeed();}
+  if(e.key==="ArrowLeft"){stop();i=Math.max(0,i-1);draw();refillFeed();}
+});
+
+draw(); refillFeed();
+</script>

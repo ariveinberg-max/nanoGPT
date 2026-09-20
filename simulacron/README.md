@@ -316,6 +316,7 @@ python -m simulacron --units 24 units --days 500    # who is down there
 python -m simulacron mind --days 500                # one unit's inner life in full
 python -m simulacron city --days 500                # crime, policing, and what the city believes
 python -m simulacron jackin --days 500              # walk around in 2010
+python -m simulacron --units 20 view --days 150     # build a playback console (HTML)
 python -m simulacron.test_simulacron                # 152 checks
 ```
 
@@ -382,6 +383,28 @@ want. The 1937 build hit a sharper working day, and not for a flattering
 reason: its streetcar commutes were half again as long, so a misplaced
 intention cost more and the schedule was partly geography doing the learner's
 job. The 2010 numbers are the more honest read on how well these units learn.
+
+## Watching it run
+
+`view` records a run and bakes it into a standalone HTML file — no server, no
+dependencies, open it in a browser. The console plays the recording back: a
+plate of the eight districts shaded by the danger its population *believes* in,
+units as dots moving between them, patrol weight drawn as a ring, an event
+feed, and an inspector for any unit.
+
+The shading is the part worth watching. It is not where crime happens, it is
+where people think it happens — averaged over twenty-four private and mutually
+inconsistent sets of beliefs. A district can darken without anything occurring
+in it, because fear travels through the social graph and crime does not.
+
+```
+simulacron/record.py       runs the prototype and writes a compact trace
+simulacron/viewer/page.html the console, with the trace baked in at build time
+```
+
+The viewer does not drive the simulation. The prototype is Python and a browser
+is not, so it replays a recording rather than pretending to be live — which is
+also why the transport has a scrubber.
 
 ## Jacking in
 

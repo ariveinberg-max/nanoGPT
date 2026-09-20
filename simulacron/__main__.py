@@ -154,6 +154,17 @@ def cmd_city(args):
             print(f"    {u.name}, {u.age:.0f}, of {cause}")
 
 
+def cmd_view(args):
+    """Bake one run into a standalone page you can open in a browser."""
+    from .record import build_page
+    print(f"Recording {args.units} units over {args.days} days "
+          f"(after {args.warmup} days of warm-up)...", file=sys.stderr)
+    out = build_page(out=args.out, n_units=args.units, seed=args.seed,
+                     days=args.days, warmup=args.warmup, every=args.every)
+    import os
+    print(f"{out}  ({os.path.getsize(out) / 1e6:.1f} MB) -- open it in a browser")
+
+
 def cmd_jackin(args):
     sim = _build(args)
     if args.unit:
@@ -197,6 +208,15 @@ def main(argv=None):
     c = sub.add_parser("city", help="crime, policing and what people believe")
     c.add_argument("--days", type=int, default=365)
     c.set_defaults(fn=cmd_city)
+
+    v = sub.add_parser("view", help="record a run and build a playback console")
+    v.add_argument("--days", type=int, default=150)
+    v.add_argument("--warmup", type=int, default=90,
+                   help="days to run before recording starts")
+    v.add_argument("--every", type=int, default=4,
+                   help="ticks between recorded frames (4 = hourly)")
+    v.add_argument("--out", default="simulacron-console.html")
+    v.set_defaults(fn=cmd_view)
 
     j = sub.add_parser("jackin", help="link a mind into a unit")
     j.add_argument("--days", type=int, default=365)
