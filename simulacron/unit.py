@@ -17,7 +17,7 @@ from .memory import Memory
 from .selfmodel import SelfModel
 from .social import Social
 from .workspace import Workspace
-from . import lifecourse
+from . import goals as goals_mod, lifecourse, person as person_mod, status as status_mod
 from .dualprocess import Effort, Habits
 from .family import Family
 from .worldview import Worldview
@@ -76,6 +76,7 @@ class Unit:
     district: str
     traits: dict
     rng: object
+    person: object = None
 
     # -- body ---------------------------------------------------------------
     hunger: float = 0.25
@@ -90,7 +91,8 @@ class Unit:
     _drives: dict = field(default_factory=lambda: lifecourse.drives(30.0))
     funds: float = 0.0
     debt: float = 0.0
-    employed: bool = True
+    status: str = "employed"     # what it is doing with its life
+    status_days: int = 0         # how long it has been doing it
 
     # -- mind ---------------------------------------------------------------
     affect: Affect = field(default_factory=Affect)
@@ -109,6 +111,9 @@ class Unit:
     situation: str = ""
     workspace: Workspace = field(default_factory=Workspace)
     _dependents_seen: tuple = (0.0, 0)
+    drawn_to: set = field(default_factory=set)         # venues it likes for their own sake
+    goals: list = field(default_factory=list)          # what it is trying to bring about
+    day_tally: dict = field(default_factory=dict)      # where today's hours went
     week_ticks: int = 0          # ticks worked this week
     job_search: float = 0.0      # effort put into looking
     worldview: Worldview = field(default_factory=Worldview)
@@ -145,21 +150,19 @@ class Unit:
         if age is None:
             # arrivals to a city skew young-adult
             age = float(min(78.0, 18.0 + rng.gamma(2.6, 7.0)))
-        traits = {
-            "sociability": float(rng.uniform(0.2, 1.0)),
-            "diligence": float(rng.uniform(0.2, 1.0)),
-            "appetite": float(rng.uniform(0.6, 1.4)),
-            "restlessness": float(rng.uniform(0.1, 0.9)),
-            "thrift": float(rng.uniform(0.2, 1.0)),
-        }
+        who = person_mod.make(rng)
+        traits = who.traits(rng)
         u = cls(
             name=f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}",
             home_key=home.key, work_key=work.key, district=home.district,
-            traits=traits, rng=rng, location_key=home.key,
+            traits=traits, rng=rng, person=who, location_key=home.key,
             funds=world.STARTING_FUNDS, age=age,
-            employed=lifecourse.can_work(age),
+            status=status_mod.initial(age, rng),
         )
         u.refresh_stage()
+        u.drawn_to = person_mod.draw_to(who)
+        # a steadier temperament feels less and recovers faster
+        u.affect.reactivity = 0.55 + 0.9 * who.scale("neuroticism")
         u.selfmodel.efficacy["work"] = 0.35 + 0.4 * traits["diligence"]
         u.selfmodel.efficacy["social"] = 0.35 + 0.4 * traits["sociability"]
         u.selfmodel.roles["worker"] = 0.3 * traits["diligence"]
@@ -168,6 +171,21 @@ class Unit:
         u.habit_prior = np.full(N_INTENTS, 1.0 / N_INTENTS)
         from .perception import seed_local_knowledge
         seed_local_knowledge(u, rng)
+        u.goals = goals_mod.life_goals(u, 0)
+        # Only units who arrive already grown carry one. A baby born into the
+        # prototype has lived nothing, and handing it a formative memory made
+        # its very first moment the most vivid thing it would ever have.
+        seed = person_mod.formative(who, rng) if age >= lifecourse.ADULT else None
+        if seed is not None:
+            from .memory import Episode
+            text, felt = seed
+            ep = Episode(tick=0, kind="formative", text=text,
+                         district=home.district, emotions=dict(felt))
+            u.memory.encode(ep, novelty=1.0)
+            ep.salience = min(1.0, ep.salience + 0.25)
+            u.affect.trauma = min(1.0, u.affect.trauma
+                                  + 0.12 * sum(v for k, v in felt.items()
+                                               if k in ("fear", "sadness", "shame")))
         return u
 
     # -- accessors ----------------------------------------------------------
@@ -212,6 +230,12 @@ class Unit:
             return min(1.0, seen)
         hours = max(0.0, (now - when)) / 4.0
         return min(1.0, seen + 0.012 * hours)
+
+    @property
+    def employed(self):
+        """Kept as a read-only view: plenty of code asks this question, and
+        only the status transitions should be able to answer it."""
+        return self.status == "employed"
 
     def peril(self):
         """How close this unit is to not being one. 0 safe .. 1 dying.
@@ -336,16 +360,21 @@ class Unit:
             f"{self.name} -- {lifecourse.describe(self.age)}",
             f"  lives   {self.home.name} ({self.home.district})",
             (f"  works   {self.workplace.name} at ${self.workplace.wage:.2f}/hr"
-             + ("" if self.employed else "  [OUT OF WORK]"))
-            if self.age >= lifecourse.ADULT else "  works   not yet",
+             if self.employed else
+             f"  doing   {status_mod.LABEL.get(self.status, self.status)}"),
             f"  now at  {where} in {self.district}",
             f"  hunger      [{bar(self.hunger)}]   fatigue [{bar(self.fatigue)}]",
             f"  loneliness  [{bar(self.loneliness)}]   pain    [{bar(self.pain)}]",
             f"  health      [{bar(self.health)}]   peril   [{bar(self.peril())}]",
             f"  funds       ${self.funds:,.2f}"
             + (f"   debt ${self.debt:,.2f}" if self.debt > 0.01 else ""),
+            f"  is          {self.person.sketch() if self.person else '-'}",
+            f"  cares about {', '.join(self.person.values) if self.person else '-'}",
+            f"  likes       {', '.join(self.person.interests) if self.person else '-'}"
+            + (f"; {self.person.quirk}" if self.person and self.person.quirk else ""),
+            f"  after       {goals_mod.describe(self)}",
             f"  feeling     {self.affect.describe()}",
-            f"  self        {self.selfmodel.narrative(self.affect, self.age)}",
+            f"  self        {self.selfmodel.narrative(self.affect, self.age, self.status)}",
             f"  world       {self.worldview.describe()}",
         ]
         lines.append(f"  family      {self.family.describe()}")

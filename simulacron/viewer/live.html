@@ -393,6 +393,8 @@ function render(s){
   document.getElementById("vitals").innerHTML=[
     [st.alive,"alive"],[st.children,"children"],[st.born,"born"],
     [st.dead,"dead"],[st.robberies,"robberies"],[st.unemployed,"out of work"],
+    [(st.statuses&&st.statuses.homemaker)||0,"keeping house"],
+    [(st.statuses&&st.statuses.retired)||0,"retired"],
     [st.anomalies,"questioning it"],["$"+Math.round(st.funds),"mean pocket"]
   ].map(([n,l])=>`<div class="vital"><div class="n mono">${n}</div>
     <div class="l">${l}</div></div>`).join("");
@@ -445,6 +447,14 @@ function drawPane(){
     const b=d.body;
     p.innerHTML=rows([
       ["where","<b>"+d.where+"</b>, "+d.district+" — "+d.activity],
+      ["doing with its life","<b>"+d.doing+"</b>"],
+      ["what it is like",`<span class="said">${d.is}</span>`
+        +(d.quirk?`<div style="color:var(--muted);font-size:11.5px">${d.quirk}</div>`:"")],
+      ["personality",Object.entries(d.personality||{}).map(([k,v])=>
+        `<span class="pill">${k.slice(0,4)} ${v}</span>`).join("")],
+      ["cares about",(d.values||[]).map(v=>`<span class="pill hot">${v}</span>`).join("")],
+      ["likes",(d.interests||[]).map(v=>`<span class="pill">${v}</span>`).join("")||"nothing in particular"],
+      ["what it is after",`<span class="said">${d.after}</span>`],
       ["lives","the "+d.home],
       ["work",d.work+(d.employed?"":" <span class='pill'>out of work</span>")],
       ["family",d.family],

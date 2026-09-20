@@ -13,7 +13,7 @@ events for the unit to appraise, feel and remember.
 
 import numpy as np
 
-from . import cognition, crime, family, lifecourse, perception, world
+from . import cognition, crime, family, goals as goals_mod, lifecourse, perception, status as status_mod, world
 from .affect import Appraisal
 from .brain import INTENTS, Learner, Policy
 from .unit import N_OBS, Unit, circadian, pick_job
@@ -69,6 +69,7 @@ class Simulation:
         """Advance the whole prototype by fifteen minutes."""
         clock = self.clock
         crowd = self._crowd_by_venue()
+        self._crowd_cache = crowd
         for u in self.units:
             if u.travelling:
                 u.activity = "in transit"
@@ -82,6 +83,7 @@ class Simulation:
             else:
                 self._perform(u, crowd, first=False)
             u.decay(clock)
+            self._tally(u)
             self._settle(u)
 
         if clock.tick % world.TICKS_PER_DAY == 0 and clock.tick:
@@ -315,12 +317,6 @@ class Simulation:
         u.refresh_stage()
         if u.rng.random() < lifecourse.natural_risk(u.age):
             u.health = 0.0          # reaped at the end of the day
-        if u.employed and not lifecourse.can_work(u.age):
-            u.employed = False
-            u.selfmodel.endorse("worker", -0.2)
-            cognition.experience(
-                self, u, "retired", "too old for the work now",
-                Appraisal(valence=-0.35, control=0.2, irreversible=0.8))
 
         if u.age < lifecourse.ADULT:
             # children are somebody else's problem, which is the point of them
@@ -374,8 +370,13 @@ class Simulation:
                 Appraisal(valence=-0.55, control=0.15, irreversible=0.2))
 
         self._provide(u)
+        u.selfmodel.live(u.day_tally)
+        u.day_tally = {}
+        self._restatus(u)
+        self._goals(u)
         u.selfmodel.survived(was, u.peril())
-        u.selfmodel.endorse("offender", -0.004)   # it fades if you stop
+        if u.selfmodel.close_calls and u.rng.random() < 0.25:
+            u.selfmodel.endorse("survivor", 0.03)
         if u.social.people and max(
                 (r.closeness() for r in u.social.people.values()), default=0) > 0.45:
             u.selfmodel.endorse("friend", 0.01)
@@ -389,7 +390,7 @@ class Simulation:
                 # almost everyone drew for dismissal every week and the city
                 # churned through jobs. It marks genuine absence now.
                 if worked < 4 * world.TICKS_PER_HOUR and u.rng.random() < 0.25:
-                    u.employed = False
+                    u.status = "unemployed"
                     u.selfmodel.endorse("worker", -0.3)
                     u.selfmodel.did("work", False)
                     cognition.experience(
@@ -397,11 +398,17 @@ class Simulation:
                         Appraisal(valence=-0.85, control=0.15, irreversible=0.6))
                     self.log.append(f"[{self.clock.stamp()}] {u.name} lost their job.")
                 u.week_ticks = 0
-        else:
+        elif status_mod.seeks_work(u.status):
+            # Only people who are actually looking find work. This branch used
+            # to catch everyone who was not employed, so students, homemakers,
+            # retirees and the long-term unwell all drifted into jobs and the
+            # population went back to being a hundred per cent employed.
             effort = u.job_search
-            chance = 0.02 + 0.10 * min(1.0, effort / 6.0) * u.selfmodel.can("work")
+            # Slow. At the old rate almost everyone out of work found some
+            # within a season and unemployment could not persist at any level.
+            chance = 0.005 + 0.045 * min(1.0, effort / 6.0) * u.selfmodel.can("work")
             if u.rng.random() < chance:
-                u.employed = True
+                u.status = "employed"
                 u.work_key = pick_job(u.rng, u.home.district).key
                 u.selfmodel.endorse("worker", 0.25)
                 cognition.experience(
@@ -421,6 +428,34 @@ class Simulation:
                 n += 1
             u.name = f"{u.name} ({n})"
         self.by_name[u.name] = u
+
+    def _tally(self, u):
+        """Where this tick of a life went. Identity is read off the sum of it."""
+        a, key = u.activity, None
+        if a == "working":
+            key = "worker"
+        elif a == "asleep":
+            key = None                      # sleeping is not a way of being
+        elif a in ("resting", "eating", "errands"):
+            key = "homebody" if u.location_key == u.home_key else None
+        elif a == "out":
+            here = world.VENUES_BY_KEY.get(u.location_key)
+            company = len(self._crowd_cache.get(u.location_key, ())) > 1
+            if here is not None and here.key in ("central_library", "observatory"):
+                key = "reader"
+            elif here is not None and here.kind == "civic":
+                key = "wanderer"        # a park is not a library
+            elif u.intent in ("wander", "seek"):
+                key = "wanderer"
+            elif company:
+                known = u.known_places.get(u.location_key)
+                key = "regular" if known and known.visits > 40 else "friend"
+            else:
+                key = "loner"
+        if u.pain > 0.35:
+            key = "patient"
+        if key:
+            u.day_tally[key] = u.day_tally.get(key, 0) + 1
 
     # ------------------------------------------------------------ mortality
     def _reap(self):
@@ -500,7 +535,7 @@ class Simulation:
                            home=world.VENUES_BY_KEY[a.home_key])
         child.traits = family.blend_traits(a, b, self.rng)
         child.refresh_stage()
-        child.employed = False
+        child.status = "child"
         child.funds = 0.0
         family.inherit_beliefs(child, [a, b])
         child.family.parents = (a.name, b.name)
@@ -552,13 +587,66 @@ class Simulation:
         if u in self.units:
             self.units.remove(u)
         self.jail.append((self.clock.tick + days * world.TICKS_PER_DAY, u))
-        u.employed = False
+        if u.status == "employed":
+            u.status = "unemployed"
         u.selfmodel.endorse("offender", 0.2)
         u.selfmodel.endorse("outsider", 0.25)
         cognition.experience(
             self, u, "arrested", "taken in and put away",
             Appraisal(valence=-0.8, agency="self", norm=-0.9, public=1.0,
                       control=0.05, irreversible=0.5))
+
+    def _goals(self, u):
+        """What it meant to do, how that went, and what it means to do next."""
+        cost = world.DAILY_COST
+        met, dropped = goals_mod.review(u, self.clock.tick, cost, self.by_name)
+        for g in met:
+            cognition.experience(
+                self, u, "goal_met", f"managed to {g.said}",
+                Appraisal(valence=0.65 if g.horizon == "week" else 0.9,
+                          agency="self", norm=0.5))
+            u.selfmodel.did("coping", True)
+        for g in dropped:
+            cognition.experience(
+                self, u, "goal_dropped", f"gave up on trying to {g.said}",
+                Appraisal(valence=-0.5, agency="self", control=0.25,
+                          irreversible=0.4))
+        if self.clock.day % 7 == 0:
+            have = {g.kind for g in u.goals if g.alive()}
+            for g in goals_mod.week_goals(u, self.clock.tick, cost):
+                if g.kind not in have:
+                    u.goals.append(g)
+        if not [g for g in u.goals if g.alive() and g.horizon == "life"] \
+                and u.age >= lifecourse.ADULT and u.rng.random() < 0.02:
+            u.goals.extend(goals_mod.life_goals(u, self.clock.tick))
+
+    def _restatus(self, u):
+        """Whether this unit's life changed shape today."""
+        partner = self.by_name.get(u.family.partner)
+        young = bool(u.family.dependents(self.by_name))
+        u.status_days += 1
+        move = status_mod.transitions(
+            u, u.rng, has_young_dependent=young,
+            partner_working=bool(partner and partner.employed))
+        if move is None:
+            return
+        new, why = move
+        if new == u.status:
+            return
+        was = u.status
+        u.status = new
+        u.status_days = 0
+        if new == "employed":
+            u.work_key = pick_job(u.rng, u.home.district).key
+        good = new in ("employed", "student", "retired")
+        cognition.experience(
+            self, u, "status_" + new, why,
+            Appraisal(valence=0.4 if good else -0.45,
+                      agency="self" if good else "circumstance",
+                      control=0.35 if good else 0.2,
+                      irreversible=0.5 if new in ("unable", "retired") else 0.1))
+        self.log.append(f"[{self.clock.stamp()}] {u.name} is {status_mod.LABEL[new]}"
+                        f" now — {why}.")
 
     def _release(self):
         for release_at, u in list(self.jail):
@@ -638,7 +726,9 @@ class Simulation:
             "born": self.born,
             "children": sum(1 for u in us if u.age < lifecourse.ADULT),
             "dead": len(self.dead),
-            "unemployed": sum(1 for u in us if not u.employed),
+            "unemployed": sum(1 for u in us if u.status == "unemployed"),
+            "statuses": {k: sum(1 for u in us if u.status == k)
+                         for k in status_mod.STATUSES},
             "ill": sum(1 for u in us if u.health < 0.9),
             "friends": float(np.mean([u.social.known() for u in us])),
             "robberies": self.robberies,

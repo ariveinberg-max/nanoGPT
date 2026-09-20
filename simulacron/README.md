@@ -243,6 +243,69 @@ matching what the simulation recorded happening. Episodes also carry a
 `because`: what the unit was doing when it happened, so memory records a cause
 and not only an event.
 
+## Not everyone is a worker
+
+The population used to answer this question identically. Asked what they were,
+all twenty-four units said **worker** — because `worker` was the only positive
+thing in a six-item vocabulary of which four were damage (provider, outsider,
+victim, offender), and because it gained a flat amount every working tick
+against almost no decay, so it pinned at 1.00 inside three weeks and stayed
+there for the rest of a unit's life. Everyone also *had* a job: `spawn` handed
+one to every working-age adult on the first tick.
+
+Three changes.
+
+**A city holds people doing different things.** `status.py` adds child,
+student, employed, unemployed, homemaker, unable to work and retired, seeded
+to a plausible mix and reachable both ways — people finish studying, lose
+work, walk out of it, stay home with a child, come to the end of what their
+body will do, retire, and sometimes cannot afford to stay retired. Every move
+is damped by how long the unit has been where it is, because people do not
+leave a settled life because one day went badly. Roughly 55–65% of adults are
+in work at any time, not 100%.
+
+**Identity is read off the hours, not awarded for the job.** A daily tally of
+where the waking time actually went feeds fourteen roles, all of which decay
+and none of which can exceed 0.92 — nobody is entirely one thing. A unit who
+spends its evenings out becomes a *regular*; one who never leaves becomes a
+*homebody*; one who reads at Central Library becomes a *reader*. A life that
+changes shape changes what the unit takes itself for. Occupation is the
+fallback answer, not the default one.
+
+**People, not trait vectors.** `person.py` replaces the five invented knobs
+with the Big Five on a 1-10 scale and derives the behavioural traits from it,
+plus two things a set of drives cannot produce:
+
+- **Values** — what a unit cares about, as tiebreakers. Two units equally
+  hungry and equally broke choose differently if one cares about family and
+  the other about getting out.
+- **Interests** — things pursued for no reason at all. A unit that likes the
+  ocean goes to Venice while not hungry, not lonely and not due anywhere. It
+  is a leisure pull, scaled down by whatever is pressing, because at full
+  weight it competed with eating and units went to the beach starving.
+
+Neuroticism sets how hard events land and how fast stress builds; agreeableness
+moves trust and how much a unit minds robbing someone. Each unit also arrives
+carrying one **formative memory**, tied to what it values, at the top of its
+salience ranking — a life that starts blank is not one anybody recognises.
+
+```
+Selma Hale — keeps to themselves, takes things hard, prickly
+  cares about  security, belonging
+  likes        books, the ocean, walking
+  after        in the end: have somewhere I belong
+  carries      the house went that winter, and we moved twice after
+```
+
+And **goals** (`goals.py`): a week's intentions out of circumstance — clear
+the debt, find something, see someone, eat properly for once — and ambitions
+out of values, which last and mostly are not met. Goals reach the decision, so
+behaviour has direction rather than only reacting.
+
+The cost, recorded honestly: deliberation rose from about 34% of decisions to
+about 46%. More to weigh means more hours where habit is not obviously the
+answer.
+
 ## The inner life
 
 Units are not scored on a handful of drives any more. Each one carries:
@@ -318,7 +381,7 @@ python -m simulacron city --days 500                # crime, policing, and what 
 python -m simulacron jackin --days 500              # walk around in 2010
 python -m simulacron --units 20 serve               # run it live at localhost:8000
 python -m simulacron --units 20 view --days 150     # or bake a recording to HTML
-python -m simulacron.test_simulacron                # 152 checks
+python -m simulacron.test_simulacron                # 177 checks
 ```
 
 ## Why 2010 and not 1937

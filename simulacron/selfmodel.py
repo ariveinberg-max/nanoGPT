@@ -16,7 +16,36 @@ from dataclasses import dataclass, field
 
 DOMAINS = ("work", "social", "coping", "provision")
 
-ROLES = ("worker", "provider", "friend", "outsider", "victim", "offender")
+# Things a person could plausibly be. The old vocabulary had six entries and
+# four of them were damage -- provider, outsider, victim, offender -- so the
+# only positive thing on offer besides "friend" was "worker", and every unit
+# in every run answered the same word. These are mostly not about work, and
+# none of them is awarded: they are read off how the hours actually went.
+ROLES = (
+    "worker",       # time at work
+    "parent",       # time spent on somebody who depends on you
+    "friend",       # time spent in company
+    "regular",      # the same room, often enough that they know you
+    "reader",       # time at the library, the observatory
+    "homebody",     # waking hours at home
+    "wanderer",     # out, going nowhere in particular
+    "loner",        # out, and on its own
+    "patient",      # time spent unwell
+    "survivor",     # came through something
+    "provider",     # kept somebody fed
+    "outsider",     # long enough outside it to feel outside it
+    "victim",       # what was done to it
+    "offender",     # what it did
+)
+
+# How a day's waking hours map onto what that makes you.
+LIVED = ("worker", "parent", "friend", "regular", "reader", "homebody",
+         "wanderer", "loner", "patient")
+
+# Nobody is entirely one thing. Saturating growth only slows the approach to
+# certainty -- with enough repetition a role still pins at 1.00 and the unit
+# has no room to be anything else.
+ROLE_CEILING = 0.92
 
 
 @dataclass
@@ -40,14 +69,51 @@ class SelfModel:
 
     # -- identity -----------------------------------------------------------
     def endorse(self, role, amount):
-        if role in self.roles:
-            self.roles[role] = max(0.0, min(1.0, self.roles[role] + amount))
+        """Move a role. Growth saturates, so nothing ratchets to certainty.
 
-    def identity(self, age=None):
+        `worker` used to gain a flat amount every working tick against almost
+        no decay, so it pinned at 1.00 inside three weeks and stayed there for
+        the rest of the unit's life.
+        """
+        if role not in self.roles:
+            return
+        cur = self.roles[role]
+        step = amount * (1.0 - cur) if amount > 0 else amount
+        self.roles[role] = max(0.0, min(ROLE_CEILING, cur + step))
+
+    def live(self, tally, rate=0.11):
+        """A day's hours, and what they make of a unit.
+
+        Identity is a readout here, not an award: whatever a unit actually did
+        with its waking time is what it slowly comes to be. Everything fades,
+        so a life that changes shape changes what the unit takes itself for.
+        """
+        for role in self.roles:
+            self.roles[role] = max(0.0, self.roles[role] - 0.008)
+        hours = sum(tally.get(k, 0) for k in LIVED)
+        if hours <= 0:
+            return
+        for role in LIVED:
+            share = tally.get(role, 0) / hours
+            if share > 0.04:
+                self.endorse(role, rate * share)
+
+    def identity(self, age=None, status=None):
+        """What this unit would call itself.
+
+        Occupation is one fact about a person, not the whole of them, so a
+        strongly held role wins over the census answer and the census answer
+        is the fallback rather than the default.
+        """
         if age is not None and age < 18.0:
             return "somebody's child"
         role, weight = max(self.roles.items(), key=lambda kv: kv[1])
-        return role if weight > 0.30 else "nobody in particular"
+        if weight > 0.22:
+            return role
+        if status:
+            from .status import LABEL
+            return LABEL.get(status, "nobody in particular")
+        return "nobody in particular"
 
     # -- expectation and its violation --------------------------------------
     def expect(self, key, default=0.0):
@@ -85,7 +151,7 @@ class SelfModel:
                 - 0.3 * self.roles["victim"] - 0.2 * self.roles["outsider"])
 
     # -- readout ------------------------------------------------------------
-    def narrative(self, affect=None, age=None):
+    def narrative(self, affect=None, age=None, status=None):
         """How this unit would say its life is going, if anyone asked."""
         best = max(self.efficacy.items(), key=lambda kv: kv[1])
         worst = min(self.efficacy.items(), key=lambda kv: kv[1])
@@ -95,7 +161,7 @@ class SelfModel:
             arc = "thinks it is going badly"
         else:
             arc = "expects more of the same"
-        line = (f"Sees itself as {self.identity(age)}; {arc}. "
+        line = (f"Sees itself as {self.identity(age, status)}; {arc}. "
                 f"Good at {best[0]} ({best[1]:.2f}), "
                 f"no good at {worst[0]} ({worst[1]:.2f}).")
         if affect is not None:

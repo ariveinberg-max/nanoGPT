@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from os.path import abspath, dirname, join
 from urllib.parse import parse_qs, urlparse
 
-from . import lifecourse, world
+from . import goals as goals_mod, lifecourse, status as status_mod, world
 from .sim import Simulation
 from .workspace import confabulate, honest_reason, self_report
 
@@ -92,6 +92,7 @@ class Engine:
                 "feeling": u.affect.dominant()[0],
                 "stress": round(u.affect.stress, 2),
                 "child": u.age < lifecourse.ADULT,
+                "status": u.status,
                 "thought": u.thought,
             } for u in s.units]
             return {
@@ -131,7 +132,15 @@ class Engine:
                 "trauma": round(u.affect.trauma, 2),
                 "drive": round(u.affect.drive(), 2),
                 "effort": round(u.effort.available(), 2),
-                "self": u.selfmodel.narrative(u.affect, u.age),
+                "self": u.selfmodel.narrative(u.affect, u.age, u.status),
+                "status": u.status,
+                "doing": status_mod.LABEL.get(u.status, u.status),
+                "personality": (u.person.five if u.person else {}),
+                "is": (u.person.sketch() if u.person else ""),
+                "values": list(u.person.values) if u.person else [],
+                "interests": list(u.person.interests) if u.person else [],
+                "quirk": (u.person.quirk if u.person else ""),
+                "after": goals_mod.describe(u),
                 "efficacy": {k: round(v, 2) for k, v in u.selfmodel.efficacy.items()},
                 "roles": {k: round(v, 2) for k, v in u.selfmodel.roles.items()
                           if v > 0.02},

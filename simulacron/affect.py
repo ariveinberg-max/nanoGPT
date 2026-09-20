@@ -109,10 +109,19 @@ class Affect:
     stress: float = 0.0            # chronic load; slow up, slower down
     trauma: float = 0.0            # what the worst episodes leave behind
 
+    reactivity: float = 1.0        # how hard things land, from neuroticism
+
     def feel(self, emotions, scale=1.0):
-        """Add an appraisal's emotions to the current state."""
+        """Add an appraisal's emotions to the current state.
+
+        Scaled by reactivity, so the same event does not land the same way on
+        everybody -- which is most of what it means to say two people have
+        different temperaments.
+        """
         for e, x in emotions.items():
-            self.intensity[e] = min(1.0, self.intensity[e] + x * scale)
+            gain = self.reactivity if e in NEGATIVE else \
+                (2.0 - self.reactivity)
+            self.intensity[e] = min(1.0, self.intensity[e] + x * scale * gain)
         hit = sum(self.intensity[e] for e in ("fear", "anger", "sadness", "shame", "guilt"))
         if hit > 1.4:
             self.trauma = min(1.0, self.trauma + 0.004 * (hit - 1.4))
@@ -125,7 +134,8 @@ class Affect:
         # that was frightened and ashamed look almost settled, and chronic
         # stress could never accumulate at all.
         load = self._sum(NEGATIVE) - 0.4 * self._sum(POSITIVE)
-        self.stress = min(1.0, max(0.0, self.stress + 0.015 * load - 0.0018))
+        self.stress = min(1.0, max(0.0, self.stress + 0.015 * load * self.reactivity
+                                  - 0.0018 * (2.0 - self.reactivity)))
         self.trauma = max(0.0, self.trauma - 0.00002)
 
     def _sum(self, names):

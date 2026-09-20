@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from . import crime, dualprocess, lifecourse, perception, workspace, world
+from . import crime, dualprocess, goals as goals_mod, lifecourse, perception, workspace, world
 from .affect import NEGATIVE, Appraisal
 from .brain import INTENTS
 from .memory import Episode
@@ -221,6 +221,44 @@ def evaluate(sim, u, opt):
             # will they fight back, and will they go to the police
             r["they might"] = -1.3 * rel.mind.expects_harm()
 
+    # --- what I like, and what I care about --------------------------------
+    # This is the part no drive can produce. A unit goes to the ocean because
+    # it likes the ocean, while not hungry, not lonely and not due anywhere.
+    if opt.venue and opt.venue in u.drawn_to:
+        # Liking something is a leisure pull, not a drive. Left at full weight
+        # it competed with eating, and units went to the ocean hungry.
+        spare = max(0.08, 1.0 - max(u.hunger, u.fatigue, 1.5 * u.peril()))
+        r["drawn to it"] = (1.15 + 0.5 * u.person.scale("openness")) * spare
+
+    who = u.person
+    if who is not None:
+        if opt.intent == "work":
+            r["values"] = (0.9 * who.holds("craft") + 0.7 * who.holds("security")
+                           + 0.5 * who.holds("standing")
+                           - 0.8 * who.holds("freedom"))
+        elif opt.intent == "socialize":
+            r["values"] = (0.8 * who.holds("belonging") + 0.6 * who.holds("pleasure")
+                           + (0.5 * who.holds("family") if opt.person
+                              in u.family.kin() else 0.0))
+        elif opt.intent in ("wander", "seek"):
+            r["values"] = 1.0 * who.holds("freedom") - 0.4 * who.holds("security")
+        elif opt.intent == "eat":
+            r["values"] = 0.5 * who.holds("pleasure")
+        elif opt.intent == "sleep":
+            r["values"] = 0.3 * who.holds("security")
+        elif opt.intent == "rob":
+            r["values"] = -1.6 * who.holds("fairness") - 0.6 * who.holds("standing")
+        if r.get("values", 0.0) == 0.0:
+            r.pop("values", None)
+        if opt.intent == "work" and u.dependents_worry(sim.clock.tick) > 0.2:
+            r["for them"] = 1.1 * who.holds("family") \
+                * u.dependents_worry(sim.clock.tick)
+
+    # --- what I am trying to bring about -----------------------------------
+    pull = goals_mod.toward(u, opt)
+    if abs(pull) > 0.01:
+        r["what I'm after"] = pull
+
     # --- what has my attention ---------------------------------------------
     # Only what won the workspace gets to push the decision around. A drive a
     # unit is not attending to still exists and still decays; it just is not
@@ -284,7 +322,7 @@ def dwell(u):
                               anticipated=True, certainty=0.6, control=0.25))
     if u.pain > 0.15:
         load.append(Appraisal(valence=-u.pain, control=0.2, irreversible=0.3))
-    if not u.employed:
+    if u.status == "unemployed":
         load.append(Appraisal(valence=-0.5, anticipated=True, certainty=0.5,
                               control=0.3))
     if u.peril() > 0.15:

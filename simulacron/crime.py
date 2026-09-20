@@ -101,11 +101,13 @@ def temptation(u, seen, police, sim):
     # person has nothing to do with how you think of yourself.
     identity = (1.0 - u.selfmodel.roles["offender"]) \
         * (0.35 + 0.65 * u.selfmodel.roles["worker"])
+    # temperament: how much somebody minds doing this to a person
+    decency = 0.6 + 0.8 * (u.person.scale("agreeableness") if u.person else 0.5)
     r = {
         "take": 1.6 * min(1.0, take / (2 * world.DAILY_COST)),
         "desperation": 2.6 * u.peril() + 2.2 * u.dependents_worry(),
         "risk": -2.2 * watched * (0.4 + 0.6 * (1.0 - u.affect.stress)),
-        "conscience": -(1.3 + 2.6 * identity),
+        "conscience": -(1.3 + 2.6 * identity) * decency,
     }
     # A well you have already been down. They have nothing left and they are
     # watching for you.

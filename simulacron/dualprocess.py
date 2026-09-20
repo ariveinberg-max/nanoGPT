@@ -56,7 +56,10 @@ def situation(u, view):
             "afternoon" if view.hour < 18 else "evening")
     # Workday was in this key and made it twice as sparse for no behavioural
     # gain: what a workday changes is which options exist, which the slow path
-    # sees anyway. Habits need to be coarse enough to actually fire.
+    # sees anyway. District stays, though -- taking it out looked like it
+    # would help coverage and did the opposite, because one key then collects
+    # several incompatible answers, they knock each other down, and no habit
+    # ever gets strong enough to fire.
     return f"{need}|{part}|{u.district}"
 
 
