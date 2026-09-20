@@ -139,6 +139,15 @@ input[type=range]{flex:1 1 220px;min-width:160px;accent-color:var(--accent)}
 #who .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
   gap:6px 14px;font-size:12px;color:var(--muted)}
 #who .meta b{display:block;color:var(--ink);font-weight:600}
+.who-extra{margin-top:12px;border-top:1px solid var(--line-soft);padding-top:10px;
+  display:flex;flex-direction:column;gap:7px;font-size:12.5px}
+.who-extra .lab{display:inline-block;min-width:124px;color:var(--faint);
+  font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  vertical-align:middle;margin-right:6px}
+.pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10.5px;
+  background:var(--sunk);border:1px solid var(--line-soft);color:var(--muted);
+  margin-right:4px}
+.pill.hot{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .hint{color:var(--faint);font-size:12.5px}
 .note{color:var(--muted);font-size:12px;line-height:1.55;margin-top:14px;
   border-top:1px solid var(--line-soft);padding-top:12px}
@@ -347,7 +356,9 @@ function draw(){
   document.getElementById("vitals").innerHTML=[
     [live,"alive"],[kids,"children"],[hungry,"going hungry"],
     [inperil,"in peril"],["$"+money,"median pocket"],
-    [T.dead.filter(x=>x.tick<=f.t).length,"dead"]
+    [T.dead.filter(x=>x.tick<=f.t).length,"dead"],
+    [f.s?f.s.filter(x=>T.statuses[x]!=="employed"&&T.statuses[x]!=="child").length:0,
+      "not in work"]
   ].map(([n,l])=>`<div class="vital"><div class="n mono">${n}</div><div class="l">${l}</div></div>`).join("");
 
   const cards=f.u.map((pid,n)=>{
@@ -355,6 +366,8 @@ function draw(){
     return `<button class="card" data-p="${pid}" aria-pressed="${pid===sel}">
       <div class="nm">${p.name}</div>
       <div class="rw"><span>${ACT[f.a[n]]}</span><span class="mono">${f.age[n]}</span></div>
+      <div class="rw"><span style="color:var(--accent)">${f.id?T.phrases[f.id[n]]:""}</span>
+        <span>${f.s?T.status_label[T.statuses[f.s[n]]]:""}</span></div>
       <div class="bars">
         <span title="hunger"><i style="width:${f.h[n]}%"></i></span>
         <span class="p" title="peril"><i style="width:${f.p[n]}%"></i></span>
@@ -375,17 +388,33 @@ function drawWho(f){
   const n=f.u.indexOf(sel);
   if(n<0){el.innerHTML=`<p class="hint">${PEOPLE[sel].name} is no longer in the prototype.</p>`;return;}
   const p=PEOPLE[sel];
+  const five=p.five?Object.entries(p.five).map(([k,v])=>
+    `<span class="pill">${k.slice(0,4)} ${v}</span>`).join(""):"";
   el.innerHTML=`
     <p class="quote said">“I am ${EMO_WORD[EMO[f.e[n]]]}. I am ${ACT_WORD[ACT[f.a[n]]]}.”</p>
     <div class="meta">
       <span><b>${p.name}</b>${f.age[n]} years old</span>
+      <span><b>${f.id?T.phrases[f.id[n]]:"—"}</b>what it takes itself for</span>
+      <span><b>${f.s?T.status_label[T.statuses[f.s[n]]]:"—"}</b>doing with its life</span>
       <span><b>${D[f.d[n]]}</b>where it is now</span>
       <span><b>${p.home}</b>where it lives</span>
-      <span><b>${p.work}</b>its work</span>
       <span><b class="mono">${(f.h[n]/100).toFixed(2)}</b>hunger</span>
       <span><b class="mono">${(f.p[n]/100).toFixed(2)}</b>peril</span>
       <span><b class="mono">$${f["$"][n]}</b>on it</span>
-    </div>`;
+    </div>
+    ${p.is?`<div class="who-extra">
+      <div><span class="lab">what it is like</span>
+        <span class="said">${p.is}</span>${p.quirk?` — ${p.quirk}`:""}</div>
+      <div><span class="lab">personality</span>${five}</div>
+      <div><span class="lab">cares about</span>${(p.values||[]).map(v=>
+        `<span class="pill hot">${v}</span>`).join("")}</div>
+      <div><span class="lab">likes</span>${(p.likes||[]).map(v=>
+        `<span class="pill">${v}</span>`).join("")||"nothing in particular"}</div>
+      ${f.goal?`<div><span class="lab">what it is after</span>
+        <span class="said">${T.phrases[f.goal[n]]}</span></div>`:""}
+      ${p.carries?`<div><span class="lab">carries</span>
+        <span class="said">${p.carries}</span></div>`:""}
+    </div>`:""}`;
 }
 
 function selectDistrict(d){selD=(selD===d?null:d);draw();}
