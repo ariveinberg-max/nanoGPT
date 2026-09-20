@@ -154,6 +154,23 @@ def cmd_city(args):
             print(f"    {u.name}, {u.age:.0f}, of {cause}")
 
 
+def cmd_serve(args):
+    """Run the prototype and serve it. Ctrl-C to stop."""
+    from .server import serve
+    httpd, engine = serve(host=args.host, port=args.port, n_units=args.units,
+                          seed=args.seed, warmup=args.warmup, hz=args.hz)
+    where = f"http://{args.host}:{args.port}"
+    print(f"\n  Simulacron is running at  {where}\n")
+    print(f"  {args.units} units, seed {args.seed}. Warming up {args.warmup} days "
+          f"before it opens.", file=sys.stderr)
+    print("  Ctrl-C to stop.\n", file=sys.stderr)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n  Stopped. The prototype is gone.", file=sys.stderr)
+        httpd.server_close()
+
+
 def cmd_view(args):
     """Bake one run into a standalone page you can open in a browser."""
     from .record import build_page
@@ -208,6 +225,15 @@ def main(argv=None):
     c = sub.add_parser("city", help="crime, policing and what people believe")
     c.add_argument("--days", type=int, default=365)
     c.set_defaults(fn=cmd_city)
+
+    sv = sub.add_parser("serve", help="run the prototype and watch it live in a browser")
+    sv.add_argument("--port", type=int, default=8000)
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--warmup", type=int, default=90,
+                    help="days to run before opening, so units know their way around")
+    sv.add_argument("--hz", type=float, default=8.0,
+                    help="simulated ticks per real second (4 ticks = 1 hour)")
+    sv.set_defaults(fn=cmd_serve)
 
     v = sub.add_parser("view", help="record a run and build a playback console")
     v.add_argument("--days", type=int, default=150)

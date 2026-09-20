@@ -324,15 +324,18 @@ def decide(sim, u):
     key = dualprocess.situation(u, u.view)
     u.situation = key
     reason = dualprocess.needs_thought(u, u.view, key)
-    if reason and u.effort.available() < 0.12:
-        # too worn down to think it through, whatever the reason
-        reason = ""
-        u.why_thought = "too tired to think"
+    worn_out = bool(reason) and u.effort.available() < 0.12
+    if worn_out:
+        reason = ""                 # too worn down to think, whatever the reason
     if not reason:
         habit = u.habits.get(key)
         if habit is not None and u.habits.confidence(key) >= 0.14:
             u.thought = False
-            u.why_thought = u.why_thought or "did what it always does"
+            # set every time: carrying the previous decision's reason forward
+            # made the inspector report a unit as having stopped to think
+            # about something it had long since stopped thinking about
+            u.why_thought = ("too tired to think" if worn_out
+                             else "did what it always does")
             opt = Option(habit.intent, habit.venue)
             opt.reasons = {"habit": u.habits.confidence(key)}
             u.considered = [opt]

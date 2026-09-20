@@ -1,0 +1,528 @@
+<title>Simulacron Live</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<style>
+:root{
+  --ground:#EDF0F3; --surface:#FFFFFF; --sunk:#E3E8ED;
+  --ink:#141E28; --muted:#5B6A79; --faint:#8A99A7;
+  --line:#D2DAE1; --line-soft:#E4EAEF;
+  --accent:#2E6F7E; --accent-soft:#D7E6E9;
+  --calm:#86A9A6; --unease:#C8853F; --feared:#9E3A2C;
+  --gold:#B08324;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 8px 24px rgba(20,30,40,.06);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E151C; --surface:#18212B; --sunk:#131B23;
+    --ink:#E2E9F0; --muted:#8E9DAB; --faint:#667786;
+    --line:#26323E; --line-soft:#1F2A35;
+    --accent:#5FA9B7; --accent-soft:#1D3840;
+    --calm:#6F9491; --unease:#D08F45; --feared:#C4503D;
+    --gold:#C99C36;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E151C; --surface:#18212B; --sunk:#131B23;
+  --ink:#E2E9F0; --muted:#8E9DAB; --faint:#667786;
+  --line:#26323E; --line-soft:#1F2A35;
+  --accent:#5FA9B7; --accent-soft:#1D3840;
+  --calm:#6F9491; --unease:#D08F45; --feared:#C4503D;
+  --gold:#C99C36;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px;padding-block:20px 40px}
+h1,h2,h3{margin:0;text-wrap:balance}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-variant-numeric:tabular-nums}
+.said{font-family:"IBM Plex Serif",Georgia,serif}
+
+/* ---- masthead ---- */
+.mast{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;
+  border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:18px}
+.mast h1{font-size:19px;font-weight:600;letter-spacing:-.01em}
+.mast .sub{color:var(--muted);font-size:13px}
+.eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint)}
+
+/* ---- transport ---- */
+.transport{background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;padding:12px 14px;display:flex;flex-wrap:wrap;
+  align-items:center;gap:12px;box-shadow:var(--shadow);margin-bottom:16px}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn{background:var(--sunk);border:1px solid var(--line);border-radius:7px;
+  padding:7px 13px;font-weight:500;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.play{background:var(--accent);border-color:var(--accent);color:#fff;min-width:74px}
+.btn:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.clock{font-size:15px;font-weight:600;min-width:168px}
+.clock small{display:block;font-weight:400;font-size:11.5px;color:var(--muted);
+  letter-spacing:.03em}
+input[type=range]{flex:1 1 220px;min-width:160px;accent-color:var(--accent)}
+.speeds{display:flex;gap:4px}
+.speeds .btn{padding:5px 9px;font-size:12px}
+.speeds .btn[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);
+  color:var(--accent);font-weight:600}
+
+/* ---- layout ---- */
+.grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:16px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  box-shadow:var(--shadow);overflow:hidden}
+.panel-head{display:flex;justify-content:space-between;align-items:baseline;
+  gap:10px;padding:12px 14px 0}
+.panel-body{padding:12px 14px 14px}
+
+/* ---- map ---- */
+#plate{display:block;width:100%;height:auto;max-width:100%}
+.dname{font-size:5.4px;font-weight:600;letter-spacing:.02em}
+.dstat{font-size:4.4px;letter-spacing:.04em}
+.district{cursor:pointer}
+.district:hover .dfill{stroke-width:.9}
+
+/* ---- legend ---- */
+.legend{display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  border-top:1px solid var(--line-soft);padding-top:10px;margin-top:4px;
+  font-size:11.5px;color:var(--muted)}
+.ramp{display:flex;align-items:center;gap:6px}
+.ramp i{width:54px;height:8px;border-radius:99px;display:block;
+  background:linear-gradient(90deg,var(--calm),var(--unease),var(--feared))}
+.key{display:inline-flex;align-items:center;gap:5px}
+.key b{width:8px;height:8px;border-radius:99px;display:block;background:var(--accent)}
+.key.child b{width:5px;height:5px}
+.key.peril b{background:var(--feared)}
+
+/* ---- feed ---- */
+#feed{height:226px;overflow-y:auto;margin:0;padding:0;list-style:none;
+  border-top:1px solid var(--line-soft)}
+#feed li{padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;
+  display:flex;gap:9px;align-items:flex-start}
+#feed li:last-child{border-bottom:0}
+#feed .when{color:var(--faint);font-size:10.5px;flex:0 0 74px;padding-top:1px}
+#feed .what{flex:1;min-width:0}
+.tag{display:inline-block;width:3px;align-self:stretch;border-radius:99px;
+  background:var(--line);flex:0 0 3px}
+.tag.crime{background:var(--feared)} .tag.death{background:var(--ink)}
+.tag.birth{background:var(--calm)} .tag.job{background:var(--gold)}
+.tag.anomaly{background:var(--accent)}
+.empty{color:var(--faint);padding:14px 0;font-size:12.5px}
+
+/* ---- vitals ---- */
+.vitals{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:2px 16px}
+.vital{padding:8px 0}
+.vital .n{font-size:19px;font-weight:600;letter-spacing:-.01em}
+.vital .l{font-size:10.5px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+
+/* ---- roster ---- */
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px}
+.card{background:var(--sunk);border:1px solid var(--line-soft);border-radius:8px;
+  padding:9px 10px;text-align:left;width:100%}
+.card:hover{border-color:var(--accent)}
+.card[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent)}
+.card .nm{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.card .rw{display:flex;justify-content:space-between;gap:8px;font-size:11px;
+  color:var(--muted);margin-top:2px}
+.bars{display:flex;gap:3px;margin-top:6px}
+.bars span{height:3px;flex:1;border-radius:99px;background:var(--line)}
+.bars span i{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.bars span.p i{background:var(--feared)}
+
+/* ---- inspector ---- */
+#who{border-top:1px solid var(--line-soft);margin-top:12px;padding-top:12px}
+#who .quote{font-size:15px;line-height:1.55;margin:0 0 10px}
+#who .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  gap:6px 14px;font-size:12px;color:var(--muted)}
+#who .meta b{display:block;color:var(--ink);font-weight:600}
+.hint{color:var(--faint);font-size:12.5px}
+.note{color:var(--muted);font-size:12px;line-height:1.55;margin-top:14px;
+  border-top:1px solid var(--line-soft);padding-top:12px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+<style>
+.live{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.live b{width:7px;height:7px;border-radius:99px;background:var(--calm);display:block;
+  animation:pulse 2s ease-in-out infinite}
+.live.paused b{background:var(--faint);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line-soft);margin:14px 0 0;
+  flex-wrap:wrap}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:7px 11px;
+  font-size:12.5px;color:var(--muted);font-weight:500}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.pane{padding-top:12px}
+.rows{display:flex;flex-direction:column;gap:7px}
+.row{display:flex;gap:10px;align-items:baseline;font-size:12.5px;
+  border-bottom:1px solid var(--line-soft);padding-bottom:7px}
+.row:last-child{border-bottom:0}
+.row .k{flex:0 0 132px;color:var(--muted)}
+.row .v{flex:1;min-width:0}
+.sal{flex:0 0 42px;color:var(--faint);font-size:11px}
+.pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10.5px;
+  background:var(--sunk);border:1px solid var(--line-soft);color:var(--muted);
+  margin-right:4px}
+.pill.hot{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.boot{text-align:center;padding:46px 16px;color:var(--muted)}
+.boot .bar{height:4px;background:var(--sunk);border-radius:99px;overflow:hidden;
+  max-width:280px;margin:14px auto 0}
+.boot .bar i{display:block;height:100%;background:var(--accent);width:0;
+  transition:width .4s ease}
+.gap{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.gap>div{flex:1 1 210px;background:var(--sunk);border:1px solid var(--line-soft);
+  border-radius:8px;padding:10px 11px}
+.gap .lab{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.gap .val{margin-top:3px;font-size:13px}
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <h1>Simulacron Live</h1>
+    <div class="sub mono" id="epoch">starting the prototype…</div>
+    <div class="sub" style="margin-left:auto">
+      <span class="live" id="live"><b></b><span id="livetxt">connecting</span></span>
+    </div>
+  </header>
+
+  <div id="boot" class="panel"><div class="boot">
+    <div class="eyebrow">Warming up</div>
+    <p style="margin:10px 0 0">The population is learning its way around the city.<br>
+      Nothing here is worth watching until it has.</p>
+    <div class="bar"><i id="bootbar"></i></div>
+    <div class="mono" style="margin-top:8px;font-size:12px" id="bootday"></div>
+  </div></div>
+
+  <div id="app" hidden>
+    <div class="transport">
+      <button class="btn play" id="play">Pause</button>
+      <div class="clock mono"><span id="stamp">—</span><small id="dayline">—</small></div>
+      <button class="btn" id="stepbtn">Step an hour</button>
+      <div class="speeds" role="group" aria-label="Speed">
+        <button class="btn" data-hz="2">slow</button>
+        <button class="btn" data-hz="8" aria-pressed="true">steady</button>
+        <button class="btn" data-hz="40">fast</button>
+        <button class="btn" data-hz="160">flat out</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="eyebrow">The prototype — shaded by believed danger</h2>
+          <span class="eyebrow" id="selname"></span>
+        </div>
+        <div class="panel-body">
+          <svg id="plate" viewBox="0 0 100 76" role="img"
+               aria-label="Eight districts with units shown as dots"></svg>
+          <div class="legend">
+            <span class="ramp"><i></i> danger the population believes</span>
+            <span class="key"><b></b> a unit</span>
+            <span class="key child"><b></b> a child</span>
+            <span class="key peril"><b></b> in peril</span>
+            <span class="key" style="gap:4px"><svg width="16" height="7" aria-hidden="true">
+              <rect x="0" y="1" width="16" height="5" rx="2.5" fill="none"
+                stroke="var(--accent)" stroke-width="1"/></svg> patrol</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2 class="eyebrow">What is happening</h2>
+          <span class="eyebrow" id="evcount"></span></div>
+        <div class="panel-body" style="padding-top:8px">
+          <ul id="feed"><li class="empty">Nothing yet.</li></ul>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:16px">
+      <div class="panel-head"><h2 class="eyebrow">The population</h2>
+        <span class="eyebrow" id="alive"></span></div>
+      <div class="panel-body">
+        <div class="vitals" id="vitals"></div>
+        <div class="roster" id="roster" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="inspector" style="margin-top:16px" hidden>
+      <div class="panel-head">
+        <h2 class="eyebrow" id="whoName">—</h2>
+        <button class="btn" id="closewho" style="padding:4px 10px;font-size:12px">Close</button>
+      </div>
+      <div class="panel-body" style="padding-top:6px">
+        <p class="said" id="whoSays" style="font-size:16px;line-height:1.55;margin:6px 0 0"></p>
+        <div class="gap">
+          <div><div class="lab">Why it says it did that</div>
+            <div class="val said" id="whoClaim">—</div></div>
+          <div><div class="lab">What actually decided it</div>
+            <div class="val mono" id="whoTruth">—</div></div>
+        </div>
+        <div class="tabs" role="tablist" id="tabs">
+          <button class="tab" data-t="state" role="tab" aria-selected="true">State</button>
+          <button class="tab" data-t="memories" role="tab" aria-selected="false">What it carries</button>
+          <button class="tab" data-t="people" role="tab" aria-selected="false">Who it knows</button>
+          <button class="tab" data-t="places" role="tab" aria-selected="false">What it believes</button>
+          <button class="tab" data-t="reasoning" role="tab" aria-selected="false">Last decision</button>
+        </div>
+        <div class="pane" id="pane"></div>
+      </div>
+    </section>
+
+    <p class="note">
+      This is the prototype running, not a recording. Shading is <em>believed</em>
+      danger, averaged over every unit's private and mutually inconsistent beliefs,
+      so a district can darken with nothing happening in it — fear travels through
+      the social graph and crime does not. Patrol follows reported crime and nothing
+      else.
+    </p>
+  </div>
+</div>
+
+<script>
+const NS="http://www.w3.org/2000/svg";
+const POS={"Santa Monica":[9,40],"Venice":[11,58],"Hollywood":[44,21],
+  "Silver Lake":[62,20],"Koreatown":[50,41],"Downtown":[72,38],
+  "Boyle Heights":[88,40],"Leimert Park":[52,63]};
+const LINKS=[["Downtown","Koreatown"],["Downtown","Boyle Heights"],
+  ["Downtown","Silver Lake"],["Downtown","Leimert Park"],["Koreatown","Hollywood"],
+  ["Koreatown","Silver Lake"],["Koreatown","Leimert Park"],["Silver Lake","Hollywood"],
+  ["Koreatown","Santa Monica"],["Hollywood","Santa Monica"],
+  ["Leimert Park","Santa Monica"],["Santa Monica","Venice"],["Leimert Park","Venice"]];
+const EMO_WORD={settled:"alright",fear:"afraid",anger:"angry",sadness:"sad",
+  shame:"ashamed",guilt:"guilty",joy:"glad",pride:"proud",hope:"hopeful",relief:"relieved"};
+
+function ramp(v){const c=[[134,169,166],[200,133,63],[158,58,44]];
+  const t=Math.max(0,Math.min(1,v));
+  const [a,b,k]=t<0.5?[c[0],c[1],t*2]:[c[1],c[2],(t-0.5)*2];
+  return `rgb(${a.map((x,i)=>Math.round(x+(b[i]-x)*k)).join(",")})`;}
+function tagOf(t){if(/robbed|arrested|released/.test(t))return"crime";
+  if(/died/.test(t))return"death";if(/born|together/.test(t))return"birth";
+  if(/job|work at/.test(t))return"job";if(/ANOMALY/.test(t))return"anomaly";return"";}
+
+let shapes={}, built=false, sel=null, tab="state", detail=null, playing=true;
+
+function buildPlate(districts){
+  const plate=document.getElementById("plate");
+  const seen=new Set();
+  LINKS.forEach(([a,b])=>{
+    const k=[a,b].sort().join("|"); if(seen.has(k)||!POS[a]||!POS[b])return; seen.add(k);
+    const l=document.createElementNS(NS,"line");
+    l.setAttribute("x1",POS[a][0]);l.setAttribute("y1",POS[a][1]);
+    l.setAttribute("x2",POS[b][0]);l.setAttribute("y2",POS[b][1]);
+    l.setAttribute("stroke","var(--line)");l.setAttribute("stroke-width",".45");
+    if(a==="Santa Monica"||b==="Santa Monica"||a==="Venice"||b==="Venice")
+      l.setAttribute("stroke-dasharray","1.6 1.2");
+    plate.appendChild(l);
+  });
+  districts.forEach(d=>{
+    const [x,y]=POS[d.name]||[50,38];
+    const g=document.createElementNS(NS,"g");
+    g.setAttribute("class","district");g.setAttribute("tabindex","0");
+    g.setAttribute("role","button");g.setAttribute("aria-label",d.name);
+    const r=document.createElementNS(NS,"rect");
+    r.setAttribute("x",x-10.5);r.setAttribute("y",y-7.2);r.setAttribute("width",21);
+    r.setAttribute("height",14.4);r.setAttribute("rx",2.2);
+    r.setAttribute("stroke","var(--surface)");r.setAttribute("stroke-width",".45");
+    g.appendChild(r);
+    const pat=document.createElementNS(NS,"rect");
+    pat.setAttribute("x",x-10.5);pat.setAttribute("y",y-7.2);pat.setAttribute("width",21);
+    pat.setAttribute("height",14.4);pat.setAttribute("rx",2.2);pat.setAttribute("fill","none");
+    pat.setAttribute("stroke","var(--accent)");g.appendChild(pat);
+    const nm=document.createElementNS(NS,"text");
+    nm.setAttribute("class","dname");nm.setAttribute("x",x);nm.setAttribute("y",y-3.4);
+    nm.setAttribute("text-anchor","middle");nm.setAttribute("fill","#fff");
+    nm.textContent=d.name;g.appendChild(nm);
+    const st=document.createElementNS(NS,"text");
+    st.setAttribute("class","dstat mono");st.setAttribute("x",x);st.setAttribute("y",y+6.1);
+    st.setAttribute("text-anchor","middle");st.setAttribute("fill","#fff");
+    st.setAttribute("opacity",".75");g.appendChild(st);
+    const dots=document.createElementNS(NS,"g");g.appendChild(dots);
+    plate.appendChild(g);
+    shapes[d.name]={fill:r,patrol:pat,stat:st,dots,x,y};
+  });
+  built=true;
+}
+
+function render(s){
+  if(s.booting){
+    document.getElementById("bootday").textContent=`day ${s.day} of ${s.warmup}`;
+    document.getElementById("bootbar").style.width=(100*s.day/s.warmup)+"%";
+    return;
+  }
+  document.getElementById("boot").hidden=true;
+  document.getElementById("app").hidden=false;
+  if(!built)buildPlate(s.districts);
+  document.getElementById("epoch").textContent="Los Angeles, "+s.epoch;
+  document.getElementById("stamp").textContent=s.stamp;
+  document.getElementById("dayline").textContent=`day ${s.day} of the prototype`;
+  playing=s.playing;
+  document.getElementById("play").textContent=playing?"Pause":"Play";
+  document.getElementById("live").className="live"+(playing?"":" paused");
+  document.getElementById("livetxt").textContent=playing?"running":"held";
+
+  const byD={};
+  s.units.forEach(u=>{(byD[u.district]=byD[u.district]||[]).push(u);});
+  s.districts.forEach(d=>{
+    const sh=shapes[d.name]; if(!sh)return;
+    sh.fill.setAttribute("fill",ramp(d.fear));
+    sh.patrol.setAttribute("stroke-width",(0.25+d.patrol*9).toFixed(2));
+    sh.patrol.setAttribute("opacity",(0.25+d.patrol*3).toFixed(2));
+    sh.stat.textContent=`${d.here} here · fear ${d.fear.toFixed(2)}`;
+    while(sh.dots.firstChild)sh.dots.removeChild(sh.dots.firstChild);
+    (byD[d.name]||[]).forEach((u,j)=>{
+      const cols=6,cx=sh.x-8.4+(j%cols)*3.4,cy=sh.y+1.0+Math.floor(j/cols)*2.6;
+      const c=document.createElementNS(NS,"circle");
+      c.setAttribute("cx",cx);c.setAttribute("cy",cy);
+      c.setAttribute("r",u.child?0.72:1.12);
+      c.setAttribute("fill",u.peril>0.25?"var(--feared)":"#fff");
+      c.setAttribute("opacity",u.activity==="asleep"?".42":".95");
+      if(u.name===sel){c.setAttribute("stroke","var(--ink)");
+        c.setAttribute("stroke-width",".55");c.setAttribute("r",1.5);}
+      const t=document.createElementNS(NS,"title");
+      t.textContent=`${u.name} — ${u.activity}`;c.appendChild(t);
+      sh.dots.appendChild(c);
+    });
+  });
+
+  const st=s.stats;
+  document.getElementById("alive").textContent=`${st.alive} alive`;
+  document.getElementById("vitals").innerHTML=[
+    [st.alive,"alive"],[st.children,"children"],[st.born,"born"],
+    [st.dead,"dead"],[st.robberies,"robberies"],[st.unemployed,"out of work"],
+    [st.anomalies,"questioning it"],["$"+Math.round(st.funds),"mean pocket"]
+  ].map(([n,l])=>`<div class="vital"><div class="n mono">${n}</div>
+    <div class="l">${l}</div></div>`).join("");
+
+  document.getElementById("roster").innerHTML=s.units.map(u=>
+    `<button class="card" data-n="${encodeURIComponent(u.name)}"
+      aria-pressed="${u.name===sel}">
+      <div class="nm">${u.name}</div>
+      <div class="rw"><span>${u.activity}${u.thought?" ·&nbsp;thinking":""}</span>
+        <span class="mono">${u.age}</span></div>
+      <div class="bars"><span title="hunger"><i style="width:${u.hunger*100}%"></i></span>
+        <span class="p" title="peril"><i style="width:${u.peril*100}%"></i></span></div>
+    </button>`).join("");
+  document.querySelectorAll(".card").forEach(b=>b.addEventListener("click",()=>{
+    sel=decodeURIComponent(b.dataset.n);loadUnit();}));
+
+  const feed=document.getElementById("feed");
+  feed.innerHTML=s.events.length?s.events.map(e=>{
+    const t=e.text.replace(/^\[[^\]]*\]\s*/,"");
+    return `<li><span class="tag ${tagOf(t)}"></span>
+      <span class="when mono">${e.when}</span><span class="what">${t}</span></li>`;
+  }).join(""):'<li class="empty">Nothing yet.</li>';
+  document.getElementById("evcount").textContent=s.events.length?s.events.length+" recent":"";
+}
+
+async function loadUnit(){
+  if(!sel)return;
+  const r=await fetch("/api/unit?name="+encodeURIComponent(sel));
+  detail=await r.json();
+  const box=document.getElementById("inspector");
+  box.hidden=false;
+  if(detail.gone){document.getElementById("whoName").textContent=
+    detail.name+" — no longer in the prototype";
+    document.getElementById("pane").innerHTML="";return;}
+  document.getElementById("whoName").textContent=`${detail.name} — ${detail.stage}`;
+  document.getElementById("whoSays").textContent="“"+detail.says+"”";
+  document.getElementById("whoClaim").textContent=detail.its_reason;
+  document.getElementById("whoTruth").textContent=detail.the_reason;
+  drawPane();
+}
+
+function rows(list){return `<div class="rows">`+list.map(([k,v])=>
+  `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`)
+  .join("")+`</div>`;}
+
+function drawPane(){
+  const d=detail; if(!d||d.gone)return;
+  const p=document.getElementById("pane");
+  if(tab==="state"){
+    const b=d.body;
+    p.innerHTML=rows([
+      ["where","<b>"+d.where+"</b>, "+d.district+" — "+d.activity],
+      ["lives","the "+d.home],
+      ["work",d.work+(d.employed?"":" <span class='pill'>out of work</span>")],
+      ["family",d.family],
+      ["body",`hunger ${b.hunger} · fatigue ${b.fatigue} · lonely ${b.loneliness}
+        · pain ${b.pain} · health ${b.health}`],
+      ["at risk of dying",`<span class="mono">${b.peril}</span>`],
+      ["money",`$${b.funds}`+(b.debt>0?` · owes $${b.debt}`:"")],
+      ["feeling",Object.entries(d.affect).map(([k,v])=>
+        `<span class="pill hot">${EMO_WORD[k]||k} ${v}</span>`).join("")||"settled"],
+      ["carrying",`stress ${d.stress} · trauma ${d.trauma} · will to act ${d.drive}`],
+      ["capacity to think",`${d.effort} <span class="pill">${d.habits} habits</span>`],
+      ["how it sees itself",`<span class="said">${d.self}</span>`],
+      ["what it is good at",Object.entries(d.efficacy).map(([k,v])=>
+        `<span class="pill">${k} ${v}</span>`).join("")],
+      ["what it takes itself for",Object.entries(d.roles).map(([k,v])=>
+        `<span class="pill">${k} ${v}</span>`).join("")||"nobody in particular"],
+      ["the world","<span class='said'>"+d.worldview+"</span>"],
+      ["knows of",d.knows_places+" places in the city"],
+      ["attending to","<span class='said'>"+d.attending+"</span>"],
+    ]);
+  } else if(tab==="memories"){
+    p.innerHTML=d.memories.length?`<div class="rows">`+d.memories.map(m=>
+      `<div class="row"><span class="sal mono">${m.salience}</span>
+        <span class="v">${m.text}
+        ${Object.entries(m.felt).map(([k,v])=>
+          `<span class="pill">${EMO_WORD[k]||k} ${v}</span>`).join("")}
+        ${m.drift>0.1?`<span class="pill" title="how far it has moved from what happened">shifted ${m.drift}</span>`:""}
+        ${m.because?`<div style="color:var(--faint);font-size:11.5px;margin-top:2px">on the back of: ${m.because}</div>`:""}
+        </span></div>`).join("")+`</div>`
+      :'<p class="hint">Nothing it holds onto yet.</p>';
+  } else if(tab==="people"){
+    p.innerHTML=d.people.length?rows(d.people.map(r=>[r.name,
+      `familiarity ${r.familiarity} · trust ${r.trust}${r.grudge>0.05?" · grudge "+r.grudge:""}
+       <div style="color:var(--muted);font-size:11.5px">${r.thinks}</div>`]))
+      :'<p class="hint">It has not got to know anyone.</p>';
+  } else if(tab==="places"){
+    p.innerHTML=rows(d.places.map(pl=>[pl.name,
+      `<span class="mono">danger ${pl.danger}</span> · warmth ${pl.warmth}
+       <span class="pill">${pl.visits} visits</span>`]));
+  } else {
+    p.innerHTML=(d.thought
+      ? `<p class="hint">It stopped and thought about this one — ${d.why_thought}.</p>`
+      : `<p class="hint">It did not think about this. ${d.why_thought||"Habit."}</p>`)
+      + (d.considered.length?rows(d.considered.map(o=>[
+        `<span class="mono">${o.score>0?"+":""}${o.score}</span>`,
+        `${o.option}<div style="color:var(--muted);font-size:11.5px">${o.why}</div>`]))
+        :'<p class="hint">No options were weighed.</p>');
+  }
+}
+
+document.getElementById("tabs").addEventListener("click",e=>{
+  const b=e.target.closest(".tab"); if(!b)return;
+  tab=b.dataset.t;
+  document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected",x===b));
+  drawPane();
+});
+document.getElementById("closewho").addEventListener("click",()=>{
+  sel=null;document.getElementById("inspector").hidden=true;});
+document.getElementById("play").addEventListener("click",async()=>{
+  await fetch("/api/control?play="+(playing?0:1));poll();});
+document.getElementById("stepbtn").addEventListener("click",async()=>{
+  await fetch("/api/control?play=0&step=4");poll();});
+document.querySelectorAll(".speeds .btn").forEach(b=>b.addEventListener("click",async()=>{
+  document.querySelectorAll(".speeds .btn").forEach(x=>x.setAttribute("aria-pressed",x===b));
+  await fetch("/api/control?hz="+b.dataset.hz);}));
+document.addEventListener("keydown",e=>{
+  if(e.key===" "&&e.target.tagName!=="INPUT"){e.preventDefault();
+    fetch("/api/control?play="+(playing?0:1)).then(poll);}});
+
+async function poll(){
+  try{
+    const s=await(await fetch("/api/state")).json();
+    render(s);
+    if(sel&&!s.booting)loadUnit();
+  }catch(err){
+    document.getElementById("livetxt").textContent="server stopped";
+    document.getElementById("live").className="live paused";
+  }
+}
+poll(); setInterval(poll,700);
+</script>

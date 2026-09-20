@@ -316,7 +316,8 @@ python -m simulacron --units 24 units --days 500    # who is down there
 python -m simulacron mind --days 500                # one unit's inner life in full
 python -m simulacron city --days 500                # crime, policing, and what the city believes
 python -m simulacron jackin --days 500              # walk around in 2010
-python -m simulacron --units 20 view --days 150     # build a playback console (HTML)
+python -m simulacron --units 20 serve               # run it live at localhost:8000
+python -m simulacron --units 20 view --days 150     # or bake a recording to HTML
 python -m simulacron.test_simulacron                # 152 checks
 ```
 
@@ -384,7 +385,40 @@ reason: its streetcar commutes were half again as long, so a misplaced
 intention cost more and the schedule was partly geography doing the learner's
 job. The 2010 numbers are the more honest read on how well these units learn.
 
-## Watching it run
+## Watching it run, live
+
+```bash
+python -m simulacron --units 20 serve
+#   Simulacron is running at  http://127.0.0.1:8000
+```
+
+The prototype runs in a thread and the page asks it what is happening. Standard
+library only — no dependencies, no build step, nothing to install.
+
+This is what a recording cannot do. A trace can hold where everybody is; it
+cannot hold what any of them *believes*, because that is megabytes per unit per
+hour. Live, you can ask. Click anyone and the server hands back that unit's
+memories ranked by what they cost it, what it believes about each district, who
+it knows and what it thinks of them, what it is attending to right now, what it
+says about why it did the last thing it did — and, beside it, what actually
+decided it.
+
+```
+serve --warmup 90    days to run before it opens, so units know their way around
+serve --hz 8         simulated ticks per real second (4 ticks is an hour)
+serve --port 8000    where to listen
+```
+
+It warms up before opening because the first few weeks are a population
+flailing, and there is nothing worth watching until it has learned the city.
+
+| endpoint | what it gives |
+| --- | --- |
+| `/api/state` | districts, units, events, population vitals |
+| `/api/unit?name=…` | one unit's entire inner life |
+| `/api/control?play=0&hz=40&step=4` | pause, speed, single-step |
+
+## Watching a recording
 
 `view` records a run and bakes it into a standalone HTML file — no server, no
 dependencies, open it in a browser. The console plays the recording back: a
@@ -398,8 +432,10 @@ inconsistent sets of beliefs. A district can darken without anything occurring
 in it, because fear travels through the social graph and crime does not.
 
 ```
-simulacron/record.py       runs the prototype and writes a compact trace
-simulacron/viewer/page.html the console, with the trace baked in at build time
+simulacron/server.py        runs the prototype live and answers questions about it
+simulacron/viewer/live.html the live console, with the inner-life inspector
+simulacron/record.py        runs the prototype and writes a compact trace
+simulacron/viewer/page.html the playback console, trace baked in at build time
 ```
 
 The viewer does not drive the simulation. The prototype is Python and a browser
