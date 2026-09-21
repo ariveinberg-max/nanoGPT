@@ -86,8 +86,11 @@ class PlaceBelief:
         you have walked through a hundred times without incident stops feeling
         dangerous, slowly.
         """
-        self.danger = max(0.0, self.danger - 0.0018 * rate)
-        self.fear = max(0.0, self.fear - 0.0022 * rate)
+        # Tuned against the crime rate: too fast and beliefs drain between
+        # incidents so every district reads equally safe, too slow and they
+        # only ever accumulate and every district reads equally dangerous.
+        self.danger = max(0.0, self.danger - 0.0008 * rate)
+        self.fear = max(0.0, self.fear - 0.0011 * rate)
 
     def update(self, valence, harm, fear=0.0):
         self.visits += 1

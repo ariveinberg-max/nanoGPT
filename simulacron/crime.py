@@ -28,8 +28,8 @@ from .affect import Appraisal
 # and fifty units inside. Real cities do not hold forty per cent of their
 # population in prison; the sentence is shorter, the arrest less certain, and
 # most offences never reach anybody official at all.
-JAIL_DAYS = 18
-BASE_ARREST = 0.09
+JAIL_DAYS = 22
+BASE_ARREST = 0.11
 
 
 @dataclass
@@ -93,7 +93,7 @@ class Police:
                 f"  arrests {self.arrests.get(d,0):3d}" for d, w in rows]
 
 
-def temptation(u, seen, police, sim):
+def temptation(u, seen, police, sim, present=0):
     """What the unit expects to get, and what it expects it to cost.
 
     Returned as a dict so the reasons show up in the option's own accounting,
@@ -111,7 +111,14 @@ def temptation(u, seen, police, sim):
         * (0.35 + 0.65 * u.selfmodel.roles["worker"])
     # temperament: how much somebody minds doing this to a person
     decency = 0.6 + 0.8 * (u.person.scale("agreeableness") if u.person else 0.5)
+    # Guardianship. Crime needs a motivated offender, a suitable target AND
+    # nobody around to stop it -- and only the first two scaled with
+    # population. At n=250 a room always held a target and never held any more
+    # risk for it, so robberies per unit-day doubled while the fear map went
+    # flat because every district was genuinely dangerous.
+    watchers = max(0, present - 1)
     r = {
+        "eyes on it": -1.5 * min(1.0, watchers / 3.0),
         "take": 1.6 * min(1.0, take / (2 * world.DAILY_COST)),
         "desperation": 2.6 * u.peril() + 2.2 * u.dependents_worry(),
         "risk": -2.2 * watched * (0.4 + 0.6 * (1.0 - u.affect.stress)),

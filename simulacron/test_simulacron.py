@@ -870,9 +870,9 @@ def test_crime():
     mark = Sighting(name=victim.name, district="Downtown",
                     apparent_means=200.0, familiar=0.0)
     u.funds, u.hunger, u.health = 400.0, 0.2, 1.0
-    comfortable = sum(crime.temptation(u, mark, s.police, s).values())
+    comfortable = sum(crime.temptation(u, mark, s.police, s, present=1).values())
     u.funds, u.hunger, u.health = 0.0, 0.97, 0.35
-    desperate = sum(crime.temptation(u, mark, s.police, s).values())
+    desperate = sum(crime.temptation(u, mark, s.police, s, present=1).values())
     check("desperation is what makes robbery worth considering",
           desperate > comfortable + 1.0,
           f"{comfortable:+.2f} comfortable vs {desperate:+.2f} starving")
@@ -885,8 +885,8 @@ def test_crime():
     friend.location_key, friend.district = "philippes", "Downtown"
     pal = Sighting(name=friend.name, district="Downtown",
                    apparent_means=200.0, familiar=0.8)
-    stranger = sum(crime.temptation(u, mark, s.police, s).values())
-    known = sum(crime.temptation(u, pal, s.police, s).values())
+    stranger = sum(crime.temptation(u, mark, s.police, s, present=1).values())
+    known = sum(crime.temptation(u, pal, s.police, s, present=1).values())
     check("you do not rob people you know", known < stranger,
           f"{known:+.2f} a friend vs {stranger:+.2f} a stranger")
 
@@ -938,6 +938,10 @@ def test_crime():
     check("but one district cannot swallow the whole force", top < 0.45,
           f"{top:.1%}")
     check("and nowhere is abandoned", min(p.patrol.values()) > 0.03)
+    alone = sum(crime.temptation(u, mark, s.police, s, present=1).values())
+    crowded = sum(crime.temptation(u, mark, s.police, s, present=8).values())
+    check("a crowded room is a safer one", crowded < alone - 0.5,
+          f"{alone:+.2f} alone vs {crowded:+.2f} with people about")
 
     jailed = Simulation(n_units=4, seed=9)
     v = jailed.units[0]

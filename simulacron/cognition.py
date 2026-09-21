@@ -113,12 +113,19 @@ def generate(sim, u):
 
 
 def _worth_robbing(u):
-    """Somebody here who looks worth it. Looks, not is."""
-    best, most = None, 0.0
-    for s in u.view.present:
-        if s.apparent_means > most:
-            best, most = s, s.apparent_means
-    return best if most > 0.5 * world.DAILY_COST else None
+    """Somebody here who looks worth it. Looks, not is.
+
+    A unit does not case everybody in the room -- it notices one or two. Which
+    also stops the best target in a crowd of eighty being found every time,
+    and with it the arms race between population density and crime.
+    """
+    seen = u.view.present
+    if not seen:
+        return None
+    noticed = seen if len(seen) <= 3 else [
+        seen[int(u.rng.integers(len(seen)))] for _ in range(3)]
+    best = max(noticed, key=lambda s: s.apparent_means)
+    return best if best.apparent_means > 0.5 * world.DAILY_COST else None
 
 
 def _who_might_be_there(u, place):
@@ -193,7 +200,8 @@ def evaluate(sim, u, opt):
         if seen is None:
             r["gone"] = -99.0
         else:
-            r.update(crime.temptation(u, seen, sim.police, sim))
+            r.update(crime.temptation(u, seen, sim.police, sim,
+                                      present=len(u.view.present)))
 
     # --- what it would cost me --------------------------------------------
     if v is not None:
