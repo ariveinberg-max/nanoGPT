@@ -56,6 +56,7 @@ class Simulation:
         self.log = log if log is not None else []
         self.anomalies = []
         self.dead = []              # (tick, unit, cause), kept for the record
+        self.arrivals = 0           # people who moved in; churn was invisible
         self.police = crime.Police()
         self.jail = []              # (release_tick, unit)
         self.robberies = 0
@@ -369,6 +370,12 @@ class Simulation:
                 self, u, "ill", "woke up ill",
                 Appraisal(valence=-0.55, control=0.15, irreversible=0.2))
 
+        # a quiet day everywhere it went is evidence too
+        here = u.memory.places.get(u.district)
+        if here is not None:
+            here.cool(1.6)
+        for belief in u.memory.places.values():
+            belief.cool(0.35)
         self._provide(u)
         u.selfmodel.live(u.day_tally)
         u.day_tally = {}
@@ -500,12 +507,15 @@ class Simulation:
         for u in self.units:
             if u.family.partner or u.age < lifecourse.ADULT:
                 continue
-            close = u.social.closest(3)
+            # Three was fine when a unit knew four people. At scale each knows
+            # ten, mutual top-three almost never coincides, and births fell
+            # threefold per capita. Look at everyone it is genuinely close to.
+            close = u.social.closest(8)
             for rel in close:
                 other = self.by_name.get(rel.name)
                 if other is None or not family.may_pair(u, other):
                     continue
-                if u.rng.random() > 0.02:
+                if u.rng.random() > 0.05:
                     continue
                 u.family.partner = other.name
                 other.family.partner = u.name
@@ -665,12 +675,16 @@ class Simulation:
     def _arrivals(self):
         """People keep coming to this city. Until there are births, this is why
         the prototype does not simply empty out."""
-        if len(self.units) >= self._target:
+        # Jailed units are coming back, so they should not be replaced as if
+        # they were gone. Counting them kept arrivals from quietly papering
+        # over a forty per cent incarceration rate.
+        if len(self.units) + len(self.jail) >= self._target:
             return
         if self.rng.random() < 0.25:
             u = Unit.spawn(self.rng)
             self.units.append(u)
             self._name_uniquely(u)
+            self.arrivals += 1
 
     # ------------------------------------------------------------- utilities
     def _crowd_by_venue(self):
@@ -733,5 +747,8 @@ class Simulation:
             "friends": float(np.mean([u.social.known() for u in us])),
             "robberies": self.robberies,
             "jailed": len(self.jail),
+            "incarcerated_share": round(len(self.jail)
+                                        / max(len(us) + len(self.jail), 1), 3),
+            "arrivals": self.arrivals,
             "anomalies": len(self.anomalies),
         }

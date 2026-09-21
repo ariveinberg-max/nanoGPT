@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from . import lifecourse
 
-PAIR_MIN_CLOSENESS = 0.45
+PAIR_MIN_CLOSENESS = 0.40
 FERTILE_FROM, FERTILE_TO = 20.0, 42.0
 DEPENDENT_UNTIL = 14.0
 

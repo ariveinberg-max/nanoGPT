@@ -224,9 +224,13 @@ def test_perception():
     check("what someone is carrying is guessed from appearance",
           min(guesses) < 100.0 < max(guesses),
           f"{min(guesses):.0f}..{max(guesses):.0f} for a true $100")
+    # A stranger has to actually be one: after 120 simulated days the unit
+    # knows everybody in a population this size, and picking another resident
+    # compared two acquaintances.
     friend, stranger = s.units[2], s.units[3]
     for _ in range(40):
         u.social.met(friend.name, s.clock.tick, quality=1.0)
+    u.social.people.pop(stranger.name, None)
     friend.funds = stranger.funds = 100.0
     err_friend = np.std([P.estimate_means(u, friend, u.rng) for _ in range(300)])
     err_stranger = np.std([P.estimate_means(u, stranger, u.rng) for _ in range(300)])

@@ -24,8 +24,12 @@ from dataclasses import dataclass, field
 from . import world
 from .affect import Appraisal
 
-JAIL_DAYS = 45
-BASE_ARREST = 0.16
+# A 45-day sentence against a flat arrest chance put a hundred of two hundred
+# and fifty units inside. Real cities do not hold forty per cent of their
+# population in prison; the sentence is shorter, the arrest less certain, and
+# most offences never reach anybody official at all.
+JAIL_DAYS = 18
+BASE_ARREST = 0.09
 
 
 @dataclass
@@ -65,7 +69,11 @@ class Police:
         # Smoothed against a prior, so a single report in eight districts does
         # not capture most of the city's attention. Unsmoothed, one robbery in
         # Boyle Heights took patrol there to 69% and left it.
-        prior = 2.5
+        # The prior has to grow with the evidence. Fixed at 2.5 it was swamped
+        # once reports ran to the hundreds, every district looked alike, and
+        # the feedback loop that produces policing bias got *weaker* at scale
+        # -- concentration fell from 1.31x even to 1.1x, which is backwards.
+        prior = max(2.5, 0.12 * total)
         for d in self.patrol:
             want = (self.reports[d] + prior) / (total + prior * n)
             target = 0.5 / n + 0.5 * want
@@ -166,8 +174,9 @@ def commit(sim, u, victim, police):
     u.selfmodel.endorse("worker", -0.02)
 
     # Whether it reaches the police at all depends on the victim, not the crime.
+    # Most of it never reaches anybody official.
     reported = (victim.social.of(u.name).familiarity < 0.5
-                and sim.rng.random() < 0.35 + 0.35 * min(1.0, len(crowd) / 3))
+                and sim.rng.random() < 0.18 + 0.28 * min(1.0, len(crowd) / 3))
     police.record(district, reported)
 
     caught = reported and sim.rng.random() < police.arrest_chance(district, len(crowd))
@@ -181,16 +190,29 @@ def commit(sim, u, victim, police):
 
 
 def rumour(sim, teller, district, weight):
-    """What happened to one person becomes what everybody knows about a place."""
+    """What happened to one person becomes what everybody knows about a place.
+
+    Told to a few people, not to everyone a unit knows, and with less force
+    each time the listener has already heard it. At n=24 telling the six
+    closest was fine; at n=250 every unit knew ten people, everyone heard
+    everything, and the fear map went flat -- spread across districts fell
+    from 0.57 to 0.17, which kills the one thing this system is for. A story
+    has to be able to stay in one part of town.
+    """
     from .memory import PlaceBelief
     told = 0
-    for rel in teller.social.closest(6):
+    # you tell the people you are actually close to, and there are not many
+    for rel in teller.social.closest(3):
         other = sim.by_name.get(rel.name)
-        if other is None or rel.familiarity < 0.25:
+        if other is None or rel.familiarity < 0.35:
             continue
+        if sim.rng.random() > 0.55:
+            continue                      # it does not come up
         credibility = 0.35 + 0.65 * rel.trust
         b = other.memory.places.setdefault(district, PlaceBelief())
-        b.danger = min(1.0, b.danger + weight * credibility * 0.5)
-        b.fear = min(1.0, b.fear + weight * credibility * 0.35)
+        # diminishing: the tenth time you hear a place is rough moves you less
+        room = max(0.0, 1.0 - b.danger)
+        b.danger = min(1.0, b.danger + weight * credibility * 0.5 * room)
+        b.fear = min(1.0, b.fear + weight * credibility * 0.35 * room)
         told += 1
     return told

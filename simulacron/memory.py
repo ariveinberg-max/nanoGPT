@@ -78,6 +78,17 @@ class PlaceBelief:
     fear: float = 0.0               # the dread the place calls up, consolidated
     visits: int = 0
 
+    def cool(self, rate=1.0):
+        """Nothing happening here is itself evidence about the place.
+
+        Danger never decayed, so a belief once raised stayed raised for the
+        rest of a unit's life and fear could only ever accumulate. Somewhere
+        you have walked through a hundred times without incident stops feeling
+        dangerous, slowly.
+        """
+        self.danger = max(0.0, self.danger - 0.0018 * rate)
+        self.fear = max(0.0, self.fear - 0.0022 * rate)
+
     def update(self, valence, harm, fear=0.0):
         self.visits += 1
         rate = 1.0 / min(self.visits, 12)
